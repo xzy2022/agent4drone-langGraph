@@ -1,19 +1,10 @@
 {
-  "selected_provider": "PPIO",
+  "selected_provider": "ollama",
   "provider_configs": {
-    "Ollama": {
+    "ollama": {
       "type": "ollama",
       "base_url": "http://localhost:11434",
-      "models_endpoint": "/api/tags",
-      "chat_endpoint": "/api/chat",
-      "requires_api_key": false,
-      "api_key": "",
-      "encoding": "utf-8",
-      "default_model": "llama2",
-      "default_models": [],
-      "allow_endpoint_edit": false,
-      "allow_api_toggle": false,
-      "system_prompt": ""
+      "default_model": "qwen3:8b"
     },
     "OpenAI": {
       "type": "openai-compatible",
@@ -40,7 +31,7 @@
       "models_endpoint": "/v1/anthropic",
       "chat_endpoint": "/v1/chat/completions",
       "requires_api_key": true,
-      "api_key": "sk_****【请将API key填入这里】",
+      "api_key": "sk_",
       "encoding": "utf-8",
       "default_model": "deepseek/deepseek-v3.2-exp",
       "default_models": [
