@@ -64,7 +64,7 @@ class AgentState(TypedDict):
 # ============================================================================
 
 
-def _should_continue(state: AgentState) -> Literal["tools", END]:
+def _should_continue(state: AgentState) -> Literal["tools"] | str:
     """
     Determine the next step based on the last message's tool_calls.
 
