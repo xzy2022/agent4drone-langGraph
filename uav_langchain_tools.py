@@ -29,7 +29,7 @@ def create_uav_tools(client: UAVAPIClient) -> list:
             return f"Error listing drones: {str(e)}"
 
     @tool
-    def get_session_info() -> str:
+    def get_current_session() -> str:
         """Get current session information including task type, statistics, and status.
         Use this to understand what mission you need to complete.
 
@@ -541,7 +541,7 @@ def create_uav_tools(client: UAVAPIClient) -> list:
     return [
         list_drones,
         get_drone_status,
-        get_session_info,
+        get_current_session,
         get_task_progress,
         get_weather,
         get_nearby_entities,
