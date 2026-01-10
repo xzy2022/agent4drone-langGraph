@@ -1,3 +1,4 @@
+# src\graph.py
 """
 UAV Control Agent - LangGraph ReAct Loop Implementation
 
@@ -26,7 +27,8 @@ Usage:
 
 import json
 import os
-from typing import Annotated, Literal, TypedDict
+from typing import Literal
+from typing_extensions import TypedDict, Annotated
 
 from langchain_core.messages import BaseMessage
 from langchain_core.tools import BaseTool
