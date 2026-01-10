@@ -26,115 +26,153 @@ from src.uav_api_client import UAVAPIClient
 # Pydantic Schemas for Tool Arguments
 # ============================================================================
 
+def DroneIdField():
+    return Field(
+        ..., 
+        description="The unique identifier of the drone (e.g., '04d6cfe7'). MUST exactly match the ID string returned by the 'list_drones' tool."
+    )
 
 class DroneIdSchema(BaseModel):
     """Schema for tools that only require a drone_id parameter."""
 
-    drone_id: str = Field(description="The unique identifier of the drone (e.g., 'drone-001', 'drone-002')")
+    drone_id: str = DroneIdField()
 
 
 class TakeOffSchema(BaseModel):
     """Schema for take_off command."""
-
-    drone_id: str = Field(description="The unique identifier of the drone (e.g., 'drone-001', 'drone-002')")
+    drone_id: str = DroneIdField()
     altitude: float = Field(
         default=10.0,
-        description="Target altitude in meters. Must be positive and within operational limits.",
+        description="Target absolute altitude in meters (m).",
+        ge=2.0,   # 物理硬限制：低于2米可能还在地效区
+        le=500.0   # 物理硬限制：防止模型输入 9999 米
     )
 
 
 class ChangeAltitudeSchema(BaseModel):
-    """Schema for change_altitude command."""
-
-    drone_id: str = Field(description="The unique identifier of the drone (e.g., 'drone-001', 'drone-002')")
-    altitude: float = Field(description="Target altitude in meters. Can be positive (up) or negative (down).")
-
+    """Schema for change_altitude command (Relative Movement)."""
+    drone_id: str = DroneIdField()
+    altitude: float = Field(
+        ...,
+        description="Altitude CHANGE (Delta) in meters (m). Positive (+) to ascend, Negative (-) to descend.",
+        ge=-50.0, # 防止一次性下降太快
+        le=50.0   # 防止一次性上升太快
+    )
 
 class RotateSchema(BaseModel):
     """Schema for rotate command."""
-
-    drone_id: str = Field(description="The unique identifier of the drone (e.g., 'drone-001', 'drone-002')")
+    drone_id: str = DroneIdField()
     heading: float = Field(
-        description="Target heading in degrees. 0=North, 90=East, 180=South, 270=West. Range: 0-360."
+        ...,
+        description="Target absolute heading in degrees (°). 0=North, 90=East, 180=South, 270=West.",
+        ge=0.0,
+        le=360.0
     )
 
 
 class MoveToSchema(BaseModel):
-    """Schema for move_to command."""
-
-    drone_id: str = Field(description="The unique identifier of the drone (e.g., 'drone-001', 'drone-002')")
-    x: float = Field(description="Target X coordinate in meters in the global coordinate system.")
-    y: float = Field(description="Target Y coordinate in meters in the global coordinate system.")
-    z: float = Field(description="Target Z coordinate (altitude) in meters. Must be non-negative.")
-
+    """Schema for move_to command (Absolute Movement)."""
+    drone_id: str = DroneIdField()
+    x: float = Field(..., description="Target global X coordinate in meters (m). ABSOLUTE position.")
+    y: float = Field(..., description="Target global Y coordinate in meters (m). ABSOLUTE position.")
+    z: float = Field(
+        ..., 
+        description="Target global Z altitude in meters (m). MUST be > 0.",
+        ge=1.0  # 防止地下航行
+    )
 
 class MoveTowardsSchema(BaseModel):
-    """Schema for move_towards command."""
-
-    drone_id: str = Field(description="The unique identifier of the drone (e.g., 'drone-001', 'drone-002')")
-    distance: float = Field(description="Distance to move in meters. Must be positive.")
+    """Schema for move_towards command (Relative Movement)."""
+    drone_id: str = DroneIdField()
+    distance: float = Field(
+        ..., 
+        description="Distance to fly forward in meters (m).",
+        gt=0.0,  # 距离必须为正数
+        le=100.0 # 限制单次最大移动距离，防止飞丢
+    )
     heading: Optional[float] = Field(
         default=None,
-        description="Heading direction in degrees (0-360). If not provided, uses current heading.",
+        description="Direction in degrees (°). 0=North, 90=East, 180=South, 270=West. If None, uses current drone heading.",
+        ge=0.0,
+        le=360.0
     )
     dz: Optional[float] = Field(
         default=None,
-        description="Vertical altitude change in meters. Positive = up, negative = down.",
+        description="Simultaneous vertical change in meters (m). Positive=Up, Negative=Down.",
+        ge=-10.0,
+        le=10.0
     )
 
 
 class HoverSchema(BaseModel):
     """Schema for hover command."""
-
-    drone_id: str = Field(description="The unique identifier of the drone (e.g., 'drone-001', 'drone-002')")
+    drone_id: str = DroneIdField()
     duration: Optional[float] = Field(
         default=None,
-        description="Duration to hover in seconds. If not provided, hovers indefinitely until next command.",
+        description="Duration to hover in seconds (s). If None, hovers until next command.",
+        gt=0.0  # 时间必须是正数
     )
 
 
 class ChargeSchema(BaseModel):
     """Schema for charge command."""
-
-    drone_id: str = Field(description="The unique identifier of the drone (e.g., 'drone-001', 'drone-002')")
+    drone_id: str = DroneIdField()
     charge_amount: float = Field(
-        description="Amount to charge in percentage points (0-100). Drone must be landed at charging station."
+        ...,
+        description="Target battery percentage to reach (0-100%). Drone Must be near a waypoint with charging capability",
+        ge=10.0,  # 没必要充到 5%
+        le=100.0
     )
 
 
 class SendMessageSchema(BaseModel):
     """Schema for send_message command."""
-
-    drone_id: str = Field(description="The unique identifier of the sender drone (e.g., 'drone-001', 'drone-002')")
+    drone_id: str = DroneIdField()
     target_drone_id: str = Field(
-        description="The unique identifier of the recipient drone (e.g., 'drone-002', 'drone-003')"
+        ...,
+        description="The unique ID of the RECIPIENT drone (e.g., '04d6cfe7'). MUST be different from drone_id."
     )
-    message: str = Field(description="The message content to send. Maximum length depends on system.")
-
+    message: str = Field(
+        ...,
+        description="The content text to send.",
+        min_length=1,   # 防止发送空消息
+        max_length=200  # 防止模型生成冗长的小说
+    )
 
 class BroadcastSchema(BaseModel):
     """Schema for broadcast command."""
-
-    drone_id: str = Field(description="The unique identifier of the sender drone (e.g., 'drone-001', 'drone-002')")
-    message: str = Field(description="The message content to broadcast to all other drones.")
-
+    drone_id: str = DroneIdField()
+    message: str = Field(
+        ...,
+        description="The content text to broadcast to ALL other drones.",
+        min_length=1,
+        max_length=200
+    )
 
 class MoveAlongPathSchema(BaseModel):
     """Schema for move_along_path command."""
-
-    drone_id: str = Field(description="The unique identifier of the drone (e.g., 'drone-001', 'drone-002')")
-    waypoints: List[Dict[str, float]] = Field(
-        description="List of waypoints to follow. Each waypoint must be a dict with 'x', 'y', 'z' keys in meters. "
-        "Example: [{'x': 10, 'y': 20, 'z': 15}, {'x': 30, 'y': 40, 'z': 15}]"
+    
+    drone_id: str = DroneIdField()
+    
+    path_points: List[Dict[str, float]] = Field(
+        ...,
+        description=(
+            "A sequential list of 3D coordinates (Trajectory Nodes) for the drone to follow. "
+            "Structure: [{'x': 10.5, 'y': 20.0, 'z': 5.0}, ...]. "
+            "Units are in meters (m). "
+            "NOTE: Do NOT use this for charging stations."
+        ),
+        min_items=1,  # 强制至少有一个点
+        max_items=50  # 防止路径过长导致超时
     )
 
 
 class SessionIdSchema(BaseModel):
     """Schema for operations that accept an optional session_id."""
-
+    
     session_id: str = Field(
         default="current",
-        description="Session identifier. Use 'current' for the active session, or provide a specific session ID.",
+        description="Session context ID. Defaults to 'current' active mission.",
     )
 
 
@@ -145,21 +183,29 @@ class SessionIdSchema(BaseModel):
 
 class UAVBaseTool(BaseTool):
     """Base class for all UAV tools with common client injection."""
-
-    client: UAVAPIClient = Field(description="The UAV API client instance")
+    
+    # 这里通常不需要 Pydantic 校验，因为 client 是注入的依赖，不是 LLM 生成的
+    client: Any = Field(description="The UAV API client instance", exclude=True)
 
     def _run(self, **kwargs) -> str:
         """Execute the tool command and return formatted result."""
         try:
-            result = self._execute(**kwargs)
-            return json.dumps(result, indent=2, ensure_ascii=False)
+            # 增加一个通用的参数清洗，防止 LLM 幻觉出额外的参数
+            valid_kwargs = {k: v for k, v in kwargs.items() if k in self.args}
+            result = self._execute(**valid_kwargs)
+            
+            # 针对 8B 模型优化：如果返回是 dict，确保格式整洁
+            if isinstance(result, (dict, list)):
+                return json.dumps(result, indent=2, ensure_ascii=False)
+            return str(result)
+            
         except Exception as e:
-            return f"Error: {str(e)}"
+            # 简化的错误信息，避免 Log 泄露过多内部结构给 LLM
+            return f"Tool Execution Error: {str(e)}"
 
     def _execute(self, **kwargs) -> Any:
         """Override this method in subclasses to implement specific tool logic."""
         raise NotImplementedError("Subclasses must implement _execute method")
-
 
 # ============================================================================
 # Information Gathering Tools (No Parameters)
