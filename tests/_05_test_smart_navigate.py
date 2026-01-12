@@ -108,3 +108,28 @@ class TestSmartNavigateTool:
         
         path_low = gmm.a_star_search({"x":0, "y":0, "z":5.0}, {"x":10, "y":10, "z":10.0})
         assert path_low is None
+
+    def test_candidate_waypoints_turning_point(self, mock_client):
+        """测试候选路点生成中的拐点识别逻辑"""
+        tool = SmartNavigateTool(client=mock_client)
+        
+        # 构造一条带拐角的路径: (0,0) -> (10,0) -> (10,10)
+        full_path = [
+            {"x": 0.0, "y": 0.0},
+            {"x": 5.0, "y": 0.0},
+            {"x": 10.0, "y": 0.0}, # 拐点
+            {"x": 10.0, "y": 5.0},
+            {"x": 10.0, "y": 10.0} # 终点
+        ]
+        
+        candidates = tool._get_candidate_waypoints(full_path, {"x": 0.0, "y": 0.0}, 30.0)
+        
+        # 预期候选点:
+        # 1. 终点 (10, 10)
+        # 2. 第一个拐点 (10, 0)
+        # 3. 第一步 (5, 0)
+        
+        assert len(candidates) == 3
+        assert candidates[0] == {"x": 10.0, "y": 10.0} # 终点
+        assert candidates[1] == {"x": 10.0, "y": 0.0}  # 拐点
+        assert candidates[2] == {"x": 5.0, "y": 0.0}   # 第一步

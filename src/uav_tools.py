@@ -592,30 +592,63 @@ class SmartNavigateTool(UAVBaseTool):
 
     def _get_candidate_waypoints(self, full_path: List[dict], current_pos: dict, sense_radius: float) -> List[dict]:
         """
-        生成级联重试的候选路点列表 [最乐观终点, ..., 保底安全点]
+        策略优化版 v2:
+        1. 终点 (尝试直连)
+        2. 最近的拐点 (A* 路径的第一条直线段终点，保证不切墙角)
+        3. 第一步 (保底，仅移动一格)
         """
         candidates = []
         
-        # 1. 终点：最乐观的选择，如果前方一路平川则一步到位
-        candidates.append(full_path[-1])
+        # --- 1. 最乐观：终点 ---
+        if full_path:
+            candidates.append(full_path[-1])
         
-        # 2. 保底安全点 (Safe Haven)：感知半径 0.8 倍处，理论上 100% 可达
-        safe_dist = sense_radius * self.SAFE_FACTOR
-        safe_wp = None
+        # --- 2. 次乐观：寻找第一个拐点 (Turning Point) ---
+        # 拐点定义：路径方向发生改变的那个节点
+        turning_point = None
         
-        for wp in full_path:
-            d = ((wp['x']-current_pos['x'])**2 + (wp['y']-current_pos['y'])**2)**0.5
-            if d > safe_dist:
-                break
-            safe_wp = wp
+        # 路径至少要有 3 个点才能判断拐弯 (起点 -> P1 -> P2)
+        if len(full_path) >= 3:
+            # 计算第一步的方向向量 (dx1, dy1)
+            # 注意：full_path[0] 通常是当前格子，full_path[1] 是下一步
+            dx1 = full_path[1]['x'] - full_path[0]['x']
+            dy1 = full_path[1]['y'] - full_path[0]['y']
             
-        # 确保不加入重复点，且不原地踏步
-        if safe_wp and safe_wp != candidates[0]:
-            if not (abs(safe_wp['x'] - current_pos['x']) < 0.1 and abs(safe_wp['y'] - current_pos['y']) < 0.1):
-                candidates.append(safe_wp)
-            elif len(full_path) > 1:
-                # 强制步进
-                candidates.append(full_path[0])
+            # 遍历后续节点，寻找方向变化
+            for i in range(2, len(full_path)):
+                dx2 = full_path[i]['x'] - full_path[i-1]['x']
+                dy2 = full_path[i]['y'] - full_path[i-1]['y']
+                
+                # 判断方向是否一致 (允许微小浮点误差)
+                # 如果方向向量变了，说明 i-1 这个点就是拐点
+                if abs(dx2 - dx1) > 0.1 or abs(dy2 - dy1) > 0.1:
+                    turning_point = full_path[i-1]
+                    break
+            
+            # 如果遍历完都没找到拐点，说明整条路径都是直的
+            # 此时拐点就是终点，无需重复添加
+        
+        # 添加拐点 (去重)
+        if turning_point:
+            # 简单的去重逻辑：如果离终点太近，就没必要加了
+            dist_to_final = ((turning_point['x'] - candidates[0]['x'])**2 + 
+                             (turning_point['y'] - candidates[0]['y'])**2)**0.5
+            if dist_to_final > 1.0: 
+                candidates.append(turning_point)
+
+        # --- 3. 保底：A* 路径的第一个有效移动节点 ---
+        # full_path[0] 是起点，full_path[1] 是迈出的第一步
+        if len(full_path) > 1:
+            first_step = full_path[1]
+            
+            # 去重检查 (避免和拐点或终点重复)
+            is_duplicate = False
+            for c in candidates:
+                if abs(c['x'] - first_step['x']) < 0.1 and abs(c['y'] - first_step['y']) < 0.1:
+                    is_duplicate = True
+            
+            if not is_duplicate:
+                candidates.append(first_step)
                 
         return candidates
 
@@ -708,7 +741,7 @@ class SmartNavigateTool(UAVBaseTool):
             for i, wp in enumerate(candidates):
                 d_attempt = ((wp['x']-current_pos['x'])**2 + (wp['y']-current_pos['y'])**2)**0.5
                 desc = "全速远航" if i == 0 else "步步为营"
-                print(f"[SmartNav] 方案 {i+1} ({desc}): 目标距离 {d_attempt:.1f}m ... ", end="", flush=True)
+                print(f"[SmartNav] 方案 {i+1} ({desc}): 目标距离 {d_attempt:.1f}m | 目标点 ({wp['x']:.1f}, {wp['y']:.1f}, {cruise_z:.1f})", end="", flush=True)
                 
                 try:
                     # 注意：这里强制使用 cruise_z 进行平飞
@@ -736,12 +769,12 @@ class SmartNavigateTool(UAVBaseTool):
             nearby_entities = self.client.get_nearby_entities(drone_id)
             grid_map.add_obstacles_from_entities(nearby_entities)
 
-            if not move_success:
-                print("[SmartNav] 警告：水平路径受阻，尝试垂直机动...")
-                # 死锁处理：如果在巡航高度还被堵，尝试再升高 10m
-                cruise_z += 10.0
-                self.client.change_altitude(drone_id, cruise_z)
-                current_pos['z'] = cruise_z # 更新本地状态
+            # if not move_success:
+            #     print("[SmartNav] 警告：水平路径受阻，尝试垂直机动...")
+            #     # 死锁处理：如果在巡航高度还被堵，尝试再升高 10m
+            #     cruise_z += 10.0
+            #     self.client.change_altitude(drone_id, cruise_z)
+            #     current_pos['z'] = cruise_z # 更新本地状态
 
         if loop_count >= max_loops:
             return "导航超时：执行步数过多。"

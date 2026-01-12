@@ -66,11 +66,12 @@ class GridMapManager:
         obs_list = entities.get('obstacles', [])
         
         for obs in obs_list:
+            
             height = obs.get('height', 0.0)
             obs_type = obs.get('type', 'unknown')
             pos = obs.get('position', obs)
             cx, cy = pos.get('x', 0), pos.get('y', 0)
-
+            print("感知到障碍物：", obs_type)
             # --- 情况 1: 多边形 (Polygon) ---
             if obs_type == 'polygon' and obs.get('vertices'):
                 verts = obs['vertices']
@@ -112,6 +113,9 @@ class GridMapManager:
 
             # --- 情况 3: 默认圆柱/点 (Fallback) ---
             else:
+
+                print("[GridMap] 警告：未知障碍物类型")
+                print(obs)
                 radius = obs.get('radius') or 0.0
                 # 如果 radius 为 0 或 None，至少占用 1 格
                 radius_grid = int(radius / self.resolution)
