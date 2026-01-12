@@ -9,7 +9,7 @@ load_dotenv(override=True)
 
 client = Client()
 
-run_id = "8dfead97-996c-465f-929d-4e6bd4d4dc1e"
+run_id = "e58dee3b-b841-4cdb-b98d-b4c5ca2cb9ee"
 
 try:
     # 尝试通过 SDK 读取 (通常需要 Run 在你的项目下)
@@ -25,7 +25,7 @@ except Exception as e:
     # 公开 Run 的 API 地址通常是: https://api.smith.langchain.com/public/<run_id>/run
     public_url = f"https://api.smith.langchain.com/public/{run_id}/run"
     response = requests.get(public_url)
-    
+    print(response.json())
     if response.status_code == 200:
         run_data = response.json()
         print("通过公开 API 成功读取 Run:", run_data.get("name"))
@@ -65,6 +65,7 @@ def clean_run_data(raw_data):
 
     # 2. 提取核心对话流 (最重要的部分)
     # LangGraph 通常把历史记录放在 outputs['messages'] 里
+    
     messages = []
     
     # 获取输出中的消息列表
