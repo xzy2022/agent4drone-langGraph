@@ -1,6 +1,23 @@
 {
-  "selected_provider": "ollama",
+  "selected_provider": "DeepSeek",
   "provider_configs": {
+    "DeepSeek": {
+      "type": "openai-compatible",
+      "base_url": "https://api.deepseek.com",
+      "models_endpoint": "/models",
+      "chat_endpoint": "/chat/completions",
+      "requires_api_key": true,
+      "api_key": "",
+      "encoding": "utf-8",
+      "default_model": "deepseek-chat",
+      "default_models": [
+        "deepseek-chat",
+        "deepseek-reasoner"
+      ],
+      "allow_endpoint_edit": true,
+      "allow_api_toggle": true,
+      "system_prompt": "You are a very friendly drone control agent. No matter what language I use to give you instructions, please call the tools to perform the task and then reply in English."
+    },
     "ollama": {
       "type": "ollama",
       "base_url": "http://localhost:11434",

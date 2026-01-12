@@ -279,6 +279,7 @@ def load_llm_settings(settings_path: str = "llm_settings.json") -> dict:
         raise KeyError(f"No provider config for {selected_provider}")
 
     return {
+        "provider_name": selected_provider,
         "llm_provider": provider_config["type"],
         "llm_base_url": provider_config["base_url"],
         "llm_model": provider_config.get("default_model", "gpt-4o-mini"),
@@ -315,7 +316,14 @@ def create_uav_agent_graph_from_settings(
 
     # Check for API key in environment variable if not in settings
     if not llm_settings["llm_api_key"]:
-        llm_settings["llm_api_key"] = os.getenv("LLM_API_KEY", "")
+        selected_provider = llm_settings.get("provider_name")
+        # Try specific keys first, then generic LLM_API_KEY
+        if selected_provider == "DeepSeek":
+            llm_settings["llm_api_key"] = os.getenv("DEEPSEEK_API_KEY") or os.getenv("LLM_API_KEY", "")
+        elif selected_provider == "OpenAI":
+            llm_settings["llm_api_key"] = os.getenv("OPENAI_API_KEY") or os.getenv("LLM_API_KEY", "")
+        else:
+            llm_settings["llm_api_key"] = os.getenv("LLM_API_KEY", "")
 
     return create_uav_agent_graph(
         llm_provider=llm_settings["llm_provider"],

@@ -628,7 +628,7 @@ def main():
 
     # Get LLM API key from args or environment if not set
     if not llm_api_key:
-        llm_api_key = os.getenv("OPENAI_API_KEY") or os.getenv("LLM_API_KEY")
+        llm_api_key = os.getenv("DEEPSEEK_API_KEY") or os.getenv("OPENAI_API_KEY") or os.getenv("LLM_API_KEY")
 
     # Get UAV API key from args or environment
     uav_api_key = args.uav_api_key or os.getenv("UAV_API_KEY")
