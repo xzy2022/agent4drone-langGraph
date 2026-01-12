@@ -14,12 +14,15 @@ Usage:
 """
 
 import json
-from typing import Any, Dict, List, Optional
+import math
+import heapq
+from typing import Any, Dict, List, Optional, Tuple, Set
 
 from langchain.tools import BaseTool
 from pydantic import BaseModel, Field
 
 from src.uav_api_client import UAVAPIClient
+from src.uav_navigator import UAVNavigator
 
 
 # ============================================================================
@@ -55,8 +58,8 @@ class ChangeAltitudeSchema(BaseModel):
     altitude: float = Field(
         ...,
         description="Altitude CHANGE (Delta) in meters (m). Positive (+) to ascend, Negative (-) to descend.",
-        ge=-50.0, # 防止一次性下降太快
-        le=50.0   # 防止一次性上升太快
+        ge=-500.0, # 防止一次性下降太快
+        le=500.0   # 防止一次性上升太快
     )
 
 class RotateSchema(BaseModel):
@@ -165,6 +168,14 @@ class MoveAlongPathSchema(BaseModel):
         min_items=1,  # 强制至少有一个点
         max_items=50  # 防止路径过长导致超时
     )
+
+
+class SmartNavigateSchema(BaseModel):
+    """Schema for smart_navigate command (Long-running autonomous movement)."""
+    drone_id: str = DroneIdField()
+    x: float = Field(..., description="Target global X coordinate.")
+    y: float = Field(..., description="Target global Y coordinate.")
+    z: float = Field(..., description="Target global Z altitude.")
 
 
 class SessionIdSchema(BaseModel):
@@ -550,6 +561,226 @@ class MoveAlongPathTool(UAVBaseTool):
         return self.client.move_along_path(drone_id=drone_id, waypoints=waypoints)
 
 
+
+
+# ============================================================================
+# Navigation & Pathfinding Managers
+# ============================================================================
+
+class GridMapManager:
+    """栅格地图管理器，负责维护障碍物数据和执行 A* 寻路"""
+    def __init__(self, resolution: float = 5.0, inflation: int = 1):
+        self.resolution = resolution
+        self.obstacles: Set[Tuple[int, int]] = set()
+        self.inflation = inflation  # 障碍物膨胀格数
+        # 定义四向移动 (dx, dy, cost)
+        self.motions = [(-1, 0, 1), (1, 0, 1), (0, -1, 1), (0, 1, 1)]
+
+    def _to_grid(self, pos: float) -> int:
+        return int(round(pos / self.resolution))
+
+    def _to_real(self, idx: int) -> float:
+        return float(idx) * self.resolution
+
+    def add_obstacles_from_entities(self, entities: dict, current_z: float):
+        """将感知到的实体转换为栅格障碍物"""
+        # 兼容处理：获取障碍物列表
+        obs_list = entities.get('obstacles', [])
+        
+        for obs in obs_list:
+            # 2D 投影避障：将障碍物坐标转换至栅格
+            # 处理嵌套或扁平的坐标结构
+            p = obs.get('position', obs)
+            ex, ey = p.get('x', 0), p.get('y', 0)
+            gx, gy = self._to_grid(ex), self._to_grid(ey)
+            
+            # 膨胀处理：增加避障余量
+            for dx in range(-self.inflation, self.inflation + 1):
+                for dy in range(-self.inflation, self.inflation + 1):
+                    self.obstacles.add((gx + dx, gy + dy))
+
+    def a_star_search(self, start_pos: dict, target_pos: dict) -> Optional[List[dict]]:
+        """A* 寻路算法，返回世界坐标系的路径列表"""
+        start_node = (self._to_grid(start_pos['x']), self._to_grid(start_pos['y']))
+        end_node = (self._to_grid(target_pos['x']), self._to_grid(target_pos['y']))
+
+        open_set = []
+        heapq.heappush(open_set, (0, start_node))
+        came_from = {}
+        g_score = {start_node: 0}
+        f_score = {start_node: self._heuristic(start_node, end_node)}
+
+        while open_set:
+            current = heapq.heappop(open_set)[1]
+
+            if current == end_node:
+                return self._reconstruct_path(came_from, current, target_pos['z'])
+
+            for dx, dy, cost in self.motions:
+                neighbor = (current[0] + dx, current[1] + dy)
+                
+                # 检查障碍物：允许起点和终点在障碍物内，防止初始计算卡死
+                if neighbor in self.obstacles and neighbor != end_node and neighbor != start_node:
+                    continue
+
+                tentative_g = g_score[current] + cost
+                if neighbor not in g_score or tentative_g < g_score[neighbor]:
+                    came_from[neighbor] = current
+                    g_score[neighbor] = tentative_g
+                    f = tentative_g + self._heuristic(neighbor, end_node)
+                    f_score[neighbor] = f
+                    heapq.heappush(open_set, (f, neighbor))
+        
+        return None  # 无路可走
+
+    def _heuristic(self, a, b):
+        # 曼哈顿距离：适合四向移动栅格
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+    def _reconstruct_path(self, came_from, current, z_height):
+        path = []
+        while current in came_from:
+            rx = self._to_real(current[0])
+            ry = self._to_real(current[1])
+            path.append({"x": rx, "y": ry, "z": z_height})
+            current = came_from[current]
+        path.reverse()
+        return path
+
+
+class SmartNavigateTool(UAVBaseTool):
+    """
+    智能导航工具 v5.0 (乐观执行 + 反向采样试错策略)
+    1. A* 全局规划：基于当前已知地图计算最优路径。
+    2. 级联重试：优先尝试远距离直线飞行（乐观），若失败则逐步回退至安全感知的近处（谨慎）。
+    3. 动态建图：通过行动后的感知反馈持续修正栅格地图，解决死锁。
+    """
+    name: str = "smart_navigate"
+    description: str = (
+        "终极导航工具。采用 A* 规划与‘乐观执行-回退重试’策略， "
+        "在开阔地带极速飞行，在复杂地形稳健避障。支持死循环自动破解和动态地图学习。"
+    )
+    args_schema: type[BaseModel] = SmartNavigateSchema
+
+    # 算法配置
+    GRID_RESOLUTION: float = 5.0
+    DEFAULT_SENSING_RADIUS: float = 30.0
+    SAFE_FACTOR: float = 0.8  # 安全系数，用于确定“保底安全点”
+
+    def _get_candidate_waypoints(self, full_path: List[dict], current_pos: dict, sense_radius: float) -> List[dict]:
+        """
+        生成级联重试的候选路点列表 [最乐观终点, ..., 保底安全点]
+        """
+        candidates = []
+        
+        # 1. 终点：最乐观的选择，如果前方一路平川则一步到位
+        candidates.append(full_path[-1])
+        
+        # 2. 保底安全点 (Safe Haven)：感知半径 0.8 倍处，理论上 100% 可达
+        safe_dist = sense_radius * self.SAFE_FACTOR
+        safe_wp = None
+        
+        for wp in full_path:
+            d = ((wp['x']-current_pos['x'])**2 + (wp['y']-current_pos['y'])**2)**0.5
+            if d > safe_dist:
+                break
+            safe_wp = wp
+            
+        # 确保不加入重复点，且不原地踏步
+        if safe_wp and safe_wp != candidates[0]:
+            if not (abs(safe_wp['x'] - current_pos['x']) < 0.1 and abs(safe_wp['y'] - current_pos['y']) < 0.1):
+                candidates.append(safe_wp)
+            elif len(full_path) > 1:
+                # 强制步进
+                candidates.append(full_path[0])
+                
+        return candidates
+
+    def _execute(self, drone_id: str, x: float, y: float, z: float) -> str:
+        target_pos = {"x": x, "y": y, "z": z}
+        print(f"\n[SmartNav] 指挥官指令下达: 终点 ({x}, {y}, {z})")
+
+        # 初始化地图与状态
+        grid_map = GridMapManager(resolution=self.GRID_RESOLUTION, inflation=1)
+        
+        try:
+            status = self.client.get_drone_status(drone_id)
+            pos_info = status.get("position", status)
+            current_pos = {"x": pos_info.get("x", 0), "y": pos_info.get("y", 0), "z": pos_info.get("z", 0)}
+            sense_radius = status.get("perceived_radius", self.DEFAULT_SENSING_RADIUS)
+            
+            # 初始感知建图
+            nearby = self.client.get_nearby_entities(drone_id)
+            grid_map.add_obstacles_from_entities(nearby, current_pos['z'])
+        except Exception as e:
+            return f"初始化失败: {str(e)}"
+        
+        max_loops = 50
+        loop_count = 0
+
+        while loop_count < max_loops:
+            loop_count += 1
+            
+            dist_to_target = ((current_pos['x']-target_pos['x'])**2 + (current_pos['y']-target_pos['y'])**2)**0.5
+            if dist_to_target < 2.0:
+                print(f"[SmartNav] 任务圆满完成。")
+                return "成功抵达目的地"
+
+            # 1. A* 全局规划
+            print(f"[SmartNav] 正在计算最优全局航线... (Cycle: {loop_count})")
+            full_path = grid_map.a_star_search(current_pos, target_pos)
+            if not full_path:
+                return "导航终止：路径被物理遮断，无法规划 A* 路径。"
+
+            # 2. 生成级联候选点
+            candidates = self._get_candidate_waypoints(full_path, current_pos, sense_radius)
+            move_success = False
+
+            # 3. 级联尝试 (从远到近)
+            for i, wp in enumerate(candidates):
+                d_attempt = ((wp['x']-current_pos['x'])**2 + (wp['y']-current_pos['y'])**2)**0.5
+                desc = "全速远航" if i == 0 else "步步为营"
+                print(f"[SmartNav] 方案 {i+1} ({desc}): 目标距离 {d_attempt:.1f}m ... ", end="", flush=True)
+                
+                try:
+                    move_result = self.client.move_to(drone_id, wp['x'], wp['y'], target_pos['z'])
+                    
+                    if isinstance(move_result, dict) and move_result.get('status') == 'error':
+                        msg = move_result.get('message', '').lower()
+                        if "obstacle" in msg or "collision" in msg:
+                            print("[遇阻]")
+                            continue # 尝试下一个更近的候选点
+                        else:
+                            return f"执行异常: {msg}"
+                    else:
+                        print("[成功]")
+                        move_success = True
+                        break # 成功跳出候选点尝试
+                except Exception as e:
+                    return f"API 通讯故障: {str(e)}"
+
+            # 4. 后验感知与动态建图 (这是学习障碍物的核心)
+            new_status = self.client.get_drone_status(drone_id)
+            new_pos_info = new_status.get("position", new_status)
+            current_pos = {"x": new_pos_info.get("x", 0), "y": new_pos_info.get("y", 0), "z": new_pos_info.get("z", 0)}
+            
+            nearby_entities = self.client.get_nearby_entities(drone_id)
+            # 即使移动失败，我们也到了离障碍物更近的地方，感知会把障碍物扫出来
+            grid_map.add_obstacles_from_entities(nearby_entities, current_pos['z'])
+
+            if not move_success:
+                print("[SmartNav] 警告：所有路径方案均告失败，正在原地尝试垂直勘测...")
+                self.client.move_to(drone_id, current_pos['x'], current_pos['y'], current_pos['z'] + 10.0)
+                # 重新扫描
+                new_status = self.client.get_drone_status(drone_id)
+                new_pos_info = new_status.get("position", new_status)
+                current_pos = {"x": new_pos_info.get("x", 0), "y": new_pos_info.get("y", 0), "z": new_pos_info.get("z", 0)}
+                nearby = self.client.get_nearby_entities(drone_id)
+                grid_map.add_obstacles_from_entities(nearby, current_pos['z'])
+        
+        return "导航超时：执行步数过多。"
+
+
 # ============================================================================
 # Factory Function
 # ============================================================================
@@ -600,6 +831,7 @@ def create_uav_tools(client: UAVAPIClient) -> List[BaseTool]:
         MoveToTool(client=client),
         MoveTowardsTool(client=client),
         SendMessageTool(client=client),
+        SmartNavigateTool(client=client),
         # MoveAlongPathTool(client=client),  # 这个是原代码中整个被注释掉的，暂时存疑
     ]
 

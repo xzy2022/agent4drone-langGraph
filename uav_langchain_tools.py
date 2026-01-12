@@ -502,8 +502,6 @@ def create_uav_tools(client: UAVAPIClient) -> list:
     #     except Exception as e:
     #         return f"Error moving along path: {str(e)}"
 
-    # ========== Multi-Parameter Tools ==========
-
     @tool
     def move_to(input_json: str) -> str:
         """Move a drone to specific 3D coordinates (x, y, z).
@@ -536,6 +534,120 @@ def create_uav_tools(client: UAVAPIClient) -> list:
         except Exception as e:
             return f"Error moving drone: {str(e)}"
 
+    @tool
+    def smart_navigate(input_json: str) -> str:
+        """智能导航工具。
+        1. 自动处理路径规划和避障。
+        2. 如果遇到未知障碍物，会自动扫描并重新规划路线。
+        3. 这是一个长时间运行的工具，直到到达目的地或确认为死路才会返回。
+
+        Input should be a JSON string with:
+        - drone_id: The ID of the drone (required)
+        - x: Target X coordinate (required)
+        - y: Target Y coordinate (required)
+        - z: Target Z coordinate (required)
+
+        Example: {{"drone_id": "drone-001", "x": 100.0, "y": 50.0, "z": 20.0}}
+        """
+        try:
+            params = json.loads(input_json) if isinstance(input_json, str) else input_json
+            drone_id = params.get('drone_id')
+            x = params.get('x')
+            y = params.get('y')
+            z = params.get('z')
+
+            if not drone_id:
+                return "Error: drone_id is required"
+            if x is None or y is None or z is None:
+                return "Error: x, y, and z coordinates are required"
+
+            from src.uav_navigator import UAVNavigator
+            
+            print(f"\n[SmartNavigate] 启动导航: 目标点 ({x}, {y}, {z})")
+            navigator = UAVNavigator(client, inflation=4.0)
+            
+            # Get current position - Support nested structure
+            status = client.get_drone_status(drone_id)
+            pos_info = status.get('position', status)
+            current_pos = {
+                "x": pos_info.get("x", 0),
+                "y": pos_info.get("y", 0),
+                "z": pos_info.get("z", 0)
+            }
+            
+            # 初始感知
+            nearby = client.get_nearby_entities(drone_id)
+            navigator.update_map(nearby)
+
+            max_retries = 15
+            retries = 0
+            
+            while retries < max_retries:
+                # 距离判定
+                dist = ((current_pos['x']-target_pos['x'])**2 + 
+                        (current_pos['y']-target_pos['y'])**2 + 
+                        (current_pos['z']-target_pos['z'])**2)**0.5
+                
+                if dist < 1.0:
+                    print("[SmartNavigate] 抵达目的地。")
+                    return "成功抵达目的地"
+
+                # 核心：使用可见性图寻路
+                print(f"[SmartNavigate] 正在规划路径... (重试次数: {retries})")
+                path = navigator.find_path(current_pos, target_pos)
+                
+                if not path:
+                    print("[SmartNavigate] 警告：未找到路径，尝试执行紧急绕行...")
+                    bypass_pt = navigator.get_bypass_point(current_pos, target_pos)
+                    client.move_to(drone_id, bypass_pt['x'], bypass_pt['y'], bypass_pt['z'])
+                    
+                    status = client.get_drone_status(drone_id)
+                    pos_info = status.get('position', status)
+                    current_pos = {"x": pos_info.get("x", 0), "y": pos_info.get("y", 0), "z": pos_info.get("z", 0)}
+                    retries += 1
+                    continue
+
+                next_wp = path[0]
+                print(f"[SmartNavigate] 步进 -> ({next_wp['x']:.1f}, {next_wp['y']:.1f}, {next_wp['z']:.1f})")
+                
+                try:
+                    move_result = client.move_to(drone_id, next_wp['x'], next_wp['y'], next_wp['z'])
+                    
+                    if isinstance(move_result, dict) and move_result.get('status') == 'error':
+                        error_msg = move_result.get('message', '')
+                        if "obstacle" in error_msg.lower() or "collision" in error_msg.lower():
+                            print(f"[SmartNavigate] 触发避障重规划: {error_msg}")
+                            nearby = client.get_nearby_entities(drone_id)
+                            navigator.update_map(nearby)
+                            
+                            bp = navigator.get_bypass_point(current_pos, target_pos)
+                            client.move_to(drone_id, bp['x'], bp['y'], bp['z'])
+                            
+                            retries += 1
+                            status = client.get_drone_status(drone_id)
+                            pos_info = status.get('position', status)
+                            current_pos = {"x": pos_info.get("x", 0), "y": pos_info.get("y", 0), "z": pos_info.get("z", 0)}
+                            continue
+                        else:
+                            return f"移动失败: {error_msg}"
+                    
+                    # 移动成功，更新坐标
+                    status = client.get_drone_status(drone_id)
+                    pos_info = status.get('position', status)
+                    current_pos = {
+                        "x": pos_info.get("x", 0),
+                        "y": pos_info.get("y", 0),
+                        "z": pos_info.get("z", 0)
+                    }
+                    
+                except Exception as e:
+                    return f"移动过程错误: {str(e)}"
+            
+            return "由于多次避障失败，导航终止。"
+        except json.JSONDecodeError as e:
+            return f"Error parsing JSON input: {str(e)}"
+        except Exception as e:
+            return f"Error during smart navigation: {str(e)}"
 
     # Return all tools
     return [
@@ -559,4 +671,5 @@ def create_uav_tools(client: UAVAPIClient) -> list:
         send_message,
         broadcast,
         charge,
+        smart_navigate,
     ]

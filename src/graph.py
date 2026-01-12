@@ -39,6 +39,8 @@ from langgraph.prebuilt import ToolNode
 from src.llm_factory import LLMFactory
 from src.uav_api_client import UAVAPIClient
 from src.uav_tools import get_uav_tools
+from template.agent_prompt import AGENT_PROMPT
+from langchain_core.messages import SystemMessage
 
 
 # ============================================================================
@@ -143,19 +145,20 @@ def _create_model_node(
     def model_node(state: AgentState) -> dict:
         """
         Agent node that processes messages and decides actions.
-
-        This node:
-        1. Receives the current state (list of messages)
-        2. Invokes the LLM with tools
-        3. Returns the AI response (which may include tool_calls)
-
-        Args:
-            state: Current agent state with messages
-
-        Returns:
-            Dict with the AI message added to the messages list
         """
         messages = state["messages"]
+        
+        # 判断是否已经有系统提示词，如果没有则添加
+        if not any(isinstance(msg, SystemMessage) for msg in messages):
+            # 将 AGENT_PROMPT 注入为系统消息
+            # 注意：AGENT_PROMPT 包含 {tool_names} 和 {tools} 占位符，
+            # 这里我们需要将其替换或移除，因为现代 Tool Binding 不需要提示词里写工具列表。
+            # 但为了保留用户的指令，我们只保留指令部分。
+            
+            clean_prompt = AGENT_PROMPT.split("AVAILABLE TOOLS:")[0].strip()
+            system_msg = SystemMessage(content=clean_prompt)
+            messages = [system_msg] + messages
+            
         response = llm_with_tools.invoke(messages)
         return {"messages": [response]}
 
