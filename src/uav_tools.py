@@ -57,9 +57,9 @@ class ChangeAltitudeSchema(BaseModel):
     drone_id: str = DroneIdField()
     altitude: float = Field(
         ...,
-        description="Altitude CHANGE (Delta) in meters (m). Positive (+) to ascend, Negative (-) to descend.",
-        ge=-500.0, # 防止一次性下降太快
-        le=500.0   # 防止一次性上升太快
+        description="Target altitude in meters (m). Must be greater than or equal to 1.0.",
+        ge=1.0,
+        le=1000.0  # 设置合理的上限
     )
 
 class RotateSchema(BaseModel):
@@ -416,10 +416,10 @@ class ChangeAltitudeTool(UAVBaseTool):
 
     name: str = "change_altitude"
     description: str = (
-        "Change a drone's altitude while maintaining its current X/Y position. "
-        "Use this to ascend or descend vertically without moving horizontally. "
-        "The drone must be in flying state. "
-        "Altitude can be increased (positive) or decreased (negative)."
+        "Set a drone to a specific altitude while maintaining its current X/Y position."
+        "Use this for pure vertical ascent or descent without horizontal movement."
+        "The drone must be in flying state."
+        "Parameter is the target altitude value (z-coordinate), which must be greater than or equal to 1."
     )
     args_schema: type[BaseModel] = ChangeAltitudeSchema
 
