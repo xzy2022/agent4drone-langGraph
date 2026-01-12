@@ -116,8 +116,6 @@ class UAVNavigator:
         try:
             path_coords = nx.shortest_path(G, source=start_pt, target=end_pt, weight='weight')
             # 转换回航点列表 (忽略起点)
-            # The path_coords includes start_pt and end_pt. We want intermediate waypoints.
-            # If path_coords has only 2 points (start and end), it means direct path.
             if len(path_coords) <= 2:
                 return [end]
             return [{"x": p[0], "y": p[1], "z": curr_z} for p in path_coords[1:-1]] + [end]
@@ -141,7 +139,6 @@ class UAVNavigator:
         infinite_obs = [o for o in blocking_obs if o['is_infinite']]
         if infinite_obs:
             print(f"[Navigator] 警告: 检测到被 {len(infinite_obs)} 个无限高障碍物困住，执行水平逃逸...")
-            # 水平偏移：向远离质心的方向或简单的斜向位移
             return {
                 "x": current['x'] + 30.0, 
                 "y": current['y'] + 30.0,
@@ -152,7 +149,6 @@ class UAVNavigator:
         max_h = max(o['base_z'] + o['height'] for o in blocking_obs)
         target_z = max_h + m
         
-        # 如果当前已经高于最高点，但还卡着（可能是浮点误差或膨胀问题），继续小幅上升
         if current['z'] >= target_z:
             target_z = current['z'] + 5.0
 

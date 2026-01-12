@@ -561,7 +561,7 @@ def create_uav_tools(client: UAVAPIClient) -> list:
             if x is None or y is None or z is None:
                 return "Error: x, y, and z coordinates are required"
 
-            from src.uav_navigator import UAVNavigator
+            from src.navigation import UAVNavigator
             
             print(f"\n[SmartNavigate] 启动导航: 目标点 ({x}, {y}, {z})")
             navigator = UAVNavigator(client, inflation=4.0)
