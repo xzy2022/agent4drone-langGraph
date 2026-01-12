@@ -686,8 +686,19 @@ class SmartNavigateTool(UAVBaseTool):
             print(f"[SmartNav] 正在计算巡航航线 (高度 {current_pos['z']:.1f}m)... (Cycle: {loop_count})")
             full_path = grid_map.a_star_search(current_pos, cruise_target)
             
-            if not full_path:
-                return "导航终止：路径被物理遮断，无法规划 A* 路径。"
+
+            # 如果 A* 返回空（因为起点终点在同一格）或者路径太短，但我们还在循环里（说明距离 > 2.0m）
+            if not full_path or len(full_path) == 0:
+                start_grid = (grid_map._to_grid(current_pos['x']), grid_map._to_grid(current_pos['y']))
+                end_grid = (grid_map._to_grid(cruise_target['x']), grid_map._to_grid(cruise_target['y']))
+                
+                # 如果是在同一个格子里，或者距离非常近，强制直飞
+                if start_grid == end_grid or dist_2d < self.GRID_RESOLUTION * 1.5:
+                    print("[SmartNav] 目标在当前栅格内，切换为直连模式。")
+                    full_path = [cruise_target] # 手动构造一条直达路径
+                else:
+                    return "导航终止：路径被物理遮断，无法规划 A* 路径。"
+                        
 
             # 2. 生成级联候选点
             candidates = self._get_candidate_waypoints(full_path, current_pos, sense_radius)
