@@ -22,7 +22,44 @@ from langchain.tools import BaseTool
 from pydantic import BaseModel, Field
 
 from src.uav_api_client import UAVAPIClient
+from src.uav_api_client import UAVAPIClient
 from src.navigation import UAVNavigator, GridMapManager
+from src.navigation.target_manager import TargetManager
+
+# --- Global Persistence Storage ---
+# (session_id, drone_id) -> Manager Instance
+_PERSISTENT_TARGETS: Dict[Tuple[str, str], TargetManager] = {}
+
+def get_target_manager(session_id: str, drone_id: str) -> TargetManager:
+    """Get or create a persistent TargetManager for the given session and drone."""
+    key = (session_id, drone_id)
+    if key in _PERSISTENT_TARGETS:
+        return _PERSISTENT_TARGETS[key]
+    
+    # Try loading from disk
+    import os
+    cache_dir = ".map_cache"
+    path = os.path.join(cache_dir, f"targets_{session_id}_{drone_id}.json")
+    
+    loaded = TargetManager.load_from_disk(path)
+    if loaded:
+        print(f"[Targets] 已加载无人机 {drone_id} 的目标记忆 (已知 {len(loaded.targets)} 个目标)")
+        manager = loaded
+    else:
+        print(f"[Targets] 为无人机 {drone_id} 初始化目标记忆...")
+        manager = TargetManager()
+        
+    _PERSISTENT_TARGETS[key] = manager
+    return manager
+
+def save_target_manager(session_id: str, drone_id: str):
+    """Save the target manager for the given session and drone to disk."""
+    manager = _PERSISTENT_TARGETS.get((session_id, drone_id))
+    if manager:
+        import os
+        cache_dir = ".map_cache"
+        path = os.path.join(cache_dir, f"targets_{session_id}_{drone_id}.json")
+        manager.save_to_disk(path)
 
 
 # ============================================================================
@@ -263,6 +300,29 @@ class GetTaskProgressTool(UAVBaseTool):
 
     def _execute(self, session_id: str = "current") -> Any:
         return self.client.get_task_progress(session_id=session_id)
+
+
+class GetKnownTargetsTool(UAVBaseTool):
+    """Get list of all targets known to a specific drone."""
+
+    name: str = "get_known_targets"
+    description: str = (
+        "Get a list of all targets that the drone has perceived or 'remembered' from previous flights. "
+        "Includes target ID, name, position, and 'is_reached' status. "
+        "Use this to look up target locations without needing to re-scan the area."
+        "The 'is_reached' status is maintained throughout the conversation."
+    )
+    args_schema: type[BaseModel] = DroneIdSchema
+
+    def _execute(self, drone_id: str) -> Any:
+        try:
+            session_info = self.client.get_current_session()
+            session_id = session_info.get("id", "default_session")
+        except Exception:
+            session_id = "default_session"
+
+        manager = get_target_manager(session_id, drone_id)
+        return manager.get_known_targets()
 
 
 class GetWeatherTool(UAVBaseTool):
@@ -724,6 +784,12 @@ class SmartNavigateTool(UAVBaseTool):
             # 初始感知建图
             nearby = self.client.get_nearby_entities(drone_id)
             grid_map.add_obstacles_from_entities(nearby)
+            
+            # --- 更新目标记忆 ---
+            target_manager = get_target_manager(session_id, drone_id)
+            target_manager.update_from_perception(nearby)
+            save_target_manager(session_id, drone_id) # 立即保存
+            
             # 标记当前位置周围为已探索
             grid_map.mark_explored_area(current_pos['x'], current_pos['y'], sense_radius)
             
@@ -828,6 +894,11 @@ class SmartNavigateTool(UAVBaseTool):
             
             nearby_entities = self.client.get_nearby_entities(drone_id)
             grid_map.add_obstacles_from_entities(nearby_entities)
+            
+            # --- 更新目标记忆 ---
+            target_manager.update_from_perception(nearby_entities)
+            save_target_manager(session_id, drone_id)
+            
             # 标记新位置周围为已探索
             grid_map.mark_explored_area(current_pos['x'], current_pos['y'], sense_radius)
 
@@ -886,6 +957,7 @@ def create_uav_tools(client: UAVAPIClient) -> List[BaseTool]:
         ListDronesTool(client=client),
         GetCurrentSessionTool(client=client),
         GetTaskProgressTool(client=client),
+        GetKnownTargetsTool(client=client),
         GetWeatherTool(client=client),
         # Single-Parameter Tools
         GetDroneStatusTool(client=client),
