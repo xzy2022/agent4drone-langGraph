@@ -13,21 +13,23 @@ class TestMapCacheIntegration(unittest.TestCase):
     def setUp(self):
         self.client = MagicMock()
         self.tool = SmartNavigateTool(client=self.client)
-        self.session_id = "test_session_123"
-        self.drone_id = "drone_abc"
+        self.session_id = "test_shared_session"
+        self.drone_id_1 = "drone_A"
+        self.drone_id_2 = "drone_B"
         self.cache_dir = ".map_cache"
-        self.expected_path = os.path.join(self.cache_dir, f"map_{self.session_id}_{self.drone_id}.json")
+        self.expected_path = os.path.join(self.cache_dir, f"map_{self.session_id}.json")
 
     def tearDown(self):
         # Cleanup cache dir if it exists
         if os.path.exists(self.expected_path):
             os.remove(self.expected_path)
-        if os.path.exists(self.cache_dir) and not os.listdir(self.cache_dir):
-            os.rmdir(self.cache_dir)
+            
+        # Clear global state
+        SmartNavigateTool._persistent_maps.clear()
 
     def test_cache_path_generation(self):
-        """Test if the cache path is generated correctly"""
-        path = self.tool._get_map_cache_path(self.session_id, self.drone_id)
+        """Test if the cache path is generated correctly (Shared by Session)"""
+        path = self.tool._get_map_cache_path(self.session_id)
         self.assertEqual(path, self.expected_path)
 
     def test_map_persistence_integration(self):
@@ -38,7 +40,7 @@ class TestMapCacheIntegration(unittest.TestCase):
         gm.explored.add((1, 1))
 
         # 2. Save using the tool's logic path
-        cache_path = self.tool._get_map_cache_path(self.session_id, self.drone_id)
+        cache_path = self.tool._get_map_cache_path(self.session_id)
         gm.save_to_disk(cache_path)
 
         # Verify file exists
@@ -53,18 +55,18 @@ class TestMapCacheIntegration(unittest.TestCase):
         self.assertIn((1, 1), loaded_gm.explored)
         self.assertEqual(len(loaded_gm.obstacles), 1)
 
-    def test_persistent_maps_dict(self):
-        """Test if the tool uses the (session_id, drone_id) key correctly"""
+    def test_shared_maps_memory(self):
+        """Test if two drones share the same map instance in memory"""
         # Clear the class-level dict for testing
         SmartNavigateTool._persistent_maps.clear()
         
-        map_key = (self.session_id, self.drone_id)
+        map_key = self.session_id
         gm = GridMapManager()
         SmartNavigateTool._persistent_maps[map_key] = gm
         
-        # Verify indexing
-        self.assertIn(map_key, SmartNavigateTool._persistent_maps)
-        self.assertEqual(SmartNavigateTool._persistent_maps[map_key], gm)
+        # Both drones should access the same map key
+        self.assertIn(self.session_id, SmartNavigateTool._persistent_maps)
+        self.assertEqual(SmartNavigateTool._persistent_maps[self.session_id], gm)
 
 if __name__ == "__main__":
     unittest.main()

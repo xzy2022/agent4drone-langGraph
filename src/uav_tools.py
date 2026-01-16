@@ -27,38 +27,38 @@ from src.navigation import UAVNavigator, GridMapManager
 from src.navigation.target_manager import TargetManager
 
 # --- Global Persistence Storage ---
-# (session_id, drone_id) -> Manager Instance
-_PERSISTENT_TARGETS: Dict[Tuple[str, str], TargetManager] = {}
+# session_id -> Manager Instance
+_PERSISTENT_TARGETS: Dict[str, TargetManager] = {}
 
-def get_target_manager(session_id: str, drone_id: str) -> TargetManager:
-    """Get or create a persistent TargetManager for the given session and drone."""
-    key = (session_id, drone_id)
+def get_target_manager(session_id: str) -> TargetManager:
+    """Get or create a persistent TargetManager for the given session (SHARED by all drones)."""
+    key = session_id
     if key in _PERSISTENT_TARGETS:
         return _PERSISTENT_TARGETS[key]
     
     # Try loading from disk
     import os
     cache_dir = ".map_cache"
-    path = os.path.join(cache_dir, f"targets_{session_id}_{drone_id}.json")
+    path = os.path.join(cache_dir, f"targets_{session_id}.json")
     
     loaded = TargetManager.load_from_disk(path)
     if loaded:
-        print(f"[Targets] 已加载无人机 {drone_id} 的目标记忆 (已知 {len(loaded.targets)} 个目标)")
+        print(f"[Targets] 已加载会话 {session_id} 的共享目标记忆 (已知 {len(loaded.targets)} 个目标)")
         manager = loaded
     else:
-        print(f"[Targets] 为无人机 {drone_id} 初始化目标记忆...")
+        print(f"[Targets] 为会话 {session_id} 初始化共享目标记忆...")
         manager = TargetManager()
         
     _PERSISTENT_TARGETS[key] = manager
     return manager
 
-def save_target_manager(session_id: str, drone_id: str):
-    """Save the target manager for the given session and drone to disk."""
-    manager = _PERSISTENT_TARGETS.get((session_id, drone_id))
+def save_target_manager(session_id: str):
+    """Save the shared target manager for the given session to disk."""
+    manager = _PERSISTENT_TARGETS.get(session_id)
     if manager:
         import os
         cache_dir = ".map_cache"
-        path = os.path.join(cache_dir, f"targets_{session_id}_{drone_id}.json")
+        path = os.path.join(cache_dir, f"targets_{session_id}.json")
         manager.save_to_disk(path)
 
 
@@ -321,7 +321,7 @@ class GetKnownTargetsTool(UAVBaseTool):
         except Exception:
             session_id = "default_session"
 
-        manager = get_target_manager(session_id, drone_id)
+        manager = get_target_manager(session_id)
         return manager.get_known_targets()
 
 
@@ -646,15 +646,15 @@ class SmartNavigateTool(UAVBaseTool):
     SAFE_FACTOR: float = 0.8  # 安全系数，用于确定“保底安全点”
 
     # --- 1. 新增：类级别的持久化存储 ---
-    # 格式：{ (session_id, drone_id): GridMapManager_Instance }
+    # 格式：{ session_id: GridMapManager_Instance }
     # 使用 ClassVar 确保所有工具实例共享这份数据
-    _persistent_maps: ClassVar[Dict[Tuple[str, str], GridMapManager]] = {}
+    _persistent_maps: ClassVar[Dict[str, GridMapManager]] = {}
 
-    def _get_map_cache_path(self, session_id: str, drone_id: str) -> str:
-        """获取地图缓存文件路径"""
+    def _get_map_cache_path(self, session_id: str) -> str:
+        """获取地图缓存文件路径 (Shared Map)"""
         import os
         cache_dir = ".map_cache"
-        return os.path.join(cache_dir, f"map_{session_id}_{drone_id}.json")
+        return os.path.join(cache_dir, f"map_{session_id}.json")
 
     def _get_candidate_waypoints(self, full_path: List[dict], current_pos: dict, sense_radius: float) -> List[dict]:
         """
@@ -752,24 +752,24 @@ class SmartNavigateTool(UAVBaseTool):
             print(f"[SmartNav] 获取会话 ID 失败: {e}，将使用默认会话。")
             session_id = "default_session"
 
-        map_key = (session_id, drone_id)
-        cache_path = self._get_map_cache_path(session_id, drone_id)
+        map_key = session_id
+        cache_path = self._get_map_cache_path(session_id)
 
         # --- 2. 获取或创建持久化地图 ---
         if map_key not in self._persistent_maps:
             # 尝试从磁盘加载
             loaded_map = GridMapManager.load_from_disk(cache_path)
             if loaded_map:
-                print(f"[SmartNav] 从磁盘恢复了无人机 {drone_id} 在会话 {session_id} 的历史地图记忆 (已探索 {len(loaded_map.obstacles)} 个障碍)")
+                print(f"[SmartNav] 从磁盘恢复了会话 {session_id} 的共享地图记忆 (已探索 {len(loaded_map.obstacles)} 个障碍)")
                 self._persistent_maps[map_key] = loaded_map
             else:
-                print(f"[SmartNav] 为无人机 {drone_id} (会话: {session_id}) 初始化全新地图记忆...")
+                print(f"[SmartNav] 为会话 {session_id} 初始化共享地图记忆...")
                 self._persistent_maps[map_key] = GridMapManager(
                     resolution=self.GRID_RESOLUTION, 
                     inflation=1
                 )
         else:
-            print(f"[SmartNav] 命中内存缓存：加载无人机 {drone_id} 的历史地图记忆 (已探索 {len(self._persistent_maps[map_key].obstacles)} 个障碍)")
+            print(f"[SmartNav] 命中内存缓存：加载会话 {session_id} 的共享地图记忆 (已探索 {len(self._persistent_maps[map_key].obstacles)} 个障碍)")
             
         # 获取引用
         grid_map = self._persistent_maps[map_key]
@@ -786,9 +786,9 @@ class SmartNavigateTool(UAVBaseTool):
             grid_map.add_obstacles_from_entities(nearby)
             
             # --- 更新目标记忆 ---
-            target_manager = get_target_manager(session_id, drone_id)
+            target_manager = get_target_manager(session_id)
             target_manager.update_from_perception(nearby)
-            save_target_manager(session_id, drone_id) # 立即保存
+            save_target_manager(session_id) # 立即保存
             
             # 标记当前位置周围为已探索
             grid_map.mark_explored_area(current_pos['x'], current_pos['y'], sense_radius)
@@ -897,7 +897,7 @@ class SmartNavigateTool(UAVBaseTool):
             
             # --- 更新目标记忆 ---
             target_manager.update_from_perception(nearby_entities)
-            save_target_manager(session_id, drone_id)
+            save_target_manager(session_id)
             
             # 标记新位置周围为已探索
             grid_map.mark_explored_area(current_pos['x'], current_pos['y'], sense_radius)
