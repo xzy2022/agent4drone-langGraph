@@ -1,0 +1,22 @@
+python>=3.11.0
+
+
+# Core LangChain & LangGraph
+langchain>=0.1.0
+langgraph
+langgraph-cli
+langchain-core
+langchain-community
+
+
+# LLM Providers
+langchain-openai
+langchain-ollama
+
+# Utilities
+pydantic
+requests
+python-dotenv
+
+# Testing
+pytest
