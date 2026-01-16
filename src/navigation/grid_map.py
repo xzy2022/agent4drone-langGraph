@@ -111,7 +111,25 @@ class GridMapManager:
                         if ((rx - cx)**2 / (a**2)) + ((ry - cy)**2 / (b**2)) <= 1.0:
                             self._inflate_point(gx, gy, height)
 
-            # --- 情况 3: 默认圆柱/点 (Fallback) ---
+            # --- 情况 3: 点/圆柱/圆 (Point/Cylinder/Circle) ---
+            elif obs_type == 'point' or obs_type == 'cylinder' or obs_type == 'circle':
+                radius = obs.get('radius') or 0.0
+                radius_grid = int(radius / self.resolution)
+                
+                cgx, cgy = self._to_grid(cx), self._to_grid(cy)
+                total_range = radius_grid 
+                
+                for dx in range(-total_range, total_range + 1):
+                    for dy in range(-total_range, total_range + 1):
+                        # 简单的圆形判定
+                        if dx*dx + dy*dy <= total_range*total_range + 0.5:
+                             self._inflate_point(cgx + dx, cgy + dy, height)
+                
+                # 确保中心点一定被添加
+                if radius_grid == 0:
+                    self._inflate_point(cgx, cgy, height)
+
+            # --- 情况 4: 未知类型 (Fallback) ---
             else:
 
                 print("[GridMap] 警告：未知障碍物类型")
