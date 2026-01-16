@@ -5,3 +5,4 @@ __pycache__/*
 *.pyc
 *.pckl
 .env
+.map_cache/
