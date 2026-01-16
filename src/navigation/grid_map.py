@@ -8,8 +8,10 @@ class GridMapManager:
     """
     def __init__(self, resolution: float = 5.0, inflation: int = 1):
         self.resolution = resolution
-        # (gx, gy) -> max_height (-1:空, 0:无限高, >0:有限高)
-        self.grid: Dict[Tuple[int, int], float] = {}
+        # (gx, gy) -> max_height (0:无限高, >0:有限高)
+        self.obstacles: Dict[Tuple[int, int], float] = {}
+        # (gx, gy) -> Set, 存储已探索过的“空地”
+        self.explored: Set[Tuple[int, int]] = set()
         self.inflation = inflation
         self.motions = [(-1, 0, 1), (1, 0, 1), (0, -1, 1), (0, 1, 1)]
 
@@ -19,21 +21,51 @@ class GridMapManager:
     def _to_real(self, idx: int) -> float:
         return float(idx) * self.resolution
 
+    def get_status(self, gx: int, gy: int) -> float:
+        """
+        查询栅格状态：
+        如果 (x,y) 在 obstacles -> 返回障碍高度 (x>0 或 0)。
+        如果 (x,y) 在 explored -> 返回 -1 (已知空闲)。
+        既不在障碍也不在探索集合 -> 默认返回 -2 (未知)。
+        """
+        if (gx, gy) in self.obstacles:
+            return self.obstacles[(gx, gy)]
+        if (gx, gy) in self.explored:
+            return -1.0
+        return -2.0
+
+    def mark_explored_area(self, cx: float, cy: float, radius: float):
+        """将周围区域标记为已探索"""
+        cgx, cgy = self._to_grid(cx), self._to_grid(cy)
+        rg = int(math.ceil(radius / self.resolution))
+        
+        for dx in range(-rg, rg + 1):
+            for dy in range(-rg, rg + 1):
+                if dx*dx + dy*dy <= (radius / self.resolution)**2 + 0.5:
+                    gx, gy = cgx + dx, cgy + dy
+                    # 只有当它不是障碍物时，才标记为已探索的空地
+                    if (gx, gy) not in self.obstacles:
+                        self.explored.add((gx, gy))
+
     def _update_grid_cell(self, gx: int, gy: int, height: float):
         """核心更新逻辑：无限高(0) 覆盖一切"""
         node = (gx, gy)
-        current_val = self.grid.get(node, -1.0)
+        # 如果标记为障碍物，则从已探索空地集合中移除
+        if node in self.explored:
+            self.explored.remove(node)
+            
+        current_val = self.obstacles.get(node, -1.0)
         
         if current_val == 0.0: return # 已经是无限高，跳过
         if height == 0.0:
-            self.grid[node] = 0.0 # 设为无限高
+            self.obstacles[node] = 0.0 # 设为无限高
             return
             
         if height > 0:
             if current_val == -1.0:
-                self.grid[node] = height
+                self.obstacles[node] = height
             else:
-                self.grid[node] = max(current_val, height)
+                self.obstacles[node] = max(current_val, height)
 
     def _inflate_point(self, gx: int, gy: int, height: float):
         """对单个点进行膨胀处理"""
@@ -152,12 +184,16 @@ class GridMapManager:
                 if radius_grid == 0:
                     self._inflate_point(cgx, cgy, height)
 
-    def is_blocked(self, gx: int, gy: int, nav_z: float) -> bool:
+    def is_blocked(self, gx: int, gy: int, nav_z: float, optimistic: bool = False) -> bool:
         """检查点是否被遮挡 (高度冲突)"""
-        height = self.grid.get((gx, gy), -1.0)
-        if height == -1.0: return False  # 无障碍物
-        if height == 0.0: return True   # 无限高
-        return nav_z <= height          # 飞行高度低于或等于障碍物高度
+        status = self.get_status(gx, gy)
+        
+        if status == -1.0: return False  # 已知空闲
+        if status == -2.0: 
+            return not optimistic        # 未知区域：乐观模式下认为不阻塞，悲观模式下认为阻塞
+            
+        if status == 0.0: return True    # 无限高
+        return nav_z <= status           # 飞行高度低于或等于障碍物高度
 
     def _heuristic(self, a, b):
         return abs(a[0] - b[0]) + abs(a[1] - b[1])
@@ -200,7 +236,8 @@ class GridMapManager:
                 
                 # 只要 neighbor 不是起点，就检查碰撞
                 if neighbor != start_node: 
-                    if self.is_blocked(neighbor[0], neighbor[1], nav_z):
+                    # A* 搜索使用乐观模式：认为未知区域是通行的
+                    if self.is_blocked(neighbor[0], neighbor[1], nav_z, optimistic=True):
                         continue
 
                 tentative_g = g_score[current] + cost

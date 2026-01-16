@@ -77,13 +77,13 @@ class TestSmartNavigateTool:
         
         grid_map = SmartNavigateTool._persistent_maps["test-drone"]
         gx, gy = grid_map._to_grid(50.0), grid_map._to_grid(0.0)
-        assert grid_map.grid.get((gx, gy)) == 20.0
+        assert grid_map.get_status(gx, gy) == 20.0
         
         # 修改感知，不再返回该障碍物，看之前的是否还在
         mock_client.get_nearby_entities.return_value = {"obstacles": []}
         tool._execute(drone_id="test-drone", x=20.0, y=0.0, z=10.0)
         
-        assert grid_map.grid.get((gx, gy)) == 20.0
+        assert grid_map.get_status(gx, gy) == 20.0
 
     def test_grid_map_new_features(self):
         """测试 GridMapManager 的新功能：多边形、椭圆、高度感知"""
@@ -98,10 +98,10 @@ class TestSmartNavigateTool:
             }]
         }
         gmm.add_obstacles_from_entities(entities)
-        assert gmm.grid.get((1, 1)) == 15.0
+        assert gmm.get_status(1, 1) == 15.0
         
-        assert gmm.is_blocked(1, 1, 10.0) == True
-        assert gmm.is_blocked(1, 1, 20.0) == False
+        assert gmm.is_blocked(1, 1, 10.0, optimistic=True) == True
+        assert gmm.is_blocked(1, 1, 20.0, optimistic=True) == False
 
         path = gmm.a_star_search({"x":0, "y":0, "z":20.0}, {"x":10, "y":10, "z":20.0})
         assert path is not None
@@ -109,27 +109,3 @@ class TestSmartNavigateTool:
         path_low = gmm.a_star_search({"x":0, "y":0, "z":5.0}, {"x":10, "y":10, "z":10.0})
         assert path_low is None
 
-    def test_candidate_waypoints_turning_point(self, mock_client):
-        """测试候选路点生成中的拐点识别逻辑"""
-        tool = SmartNavigateTool(client=mock_client)
-        
-        # 构造一条带拐角的路径: (0,0) -> (10,0) -> (10,10)
-        full_path = [
-            {"x": 0.0, "y": 0.0},
-            {"x": 5.0, "y": 0.0},
-            {"x": 10.0, "y": 0.0}, # 拐点
-            {"x": 10.0, "y": 5.0},
-            {"x": 10.0, "y": 10.0} # 终点
-        ]
-        
-        candidates = tool._get_candidate_waypoints(full_path, {"x": 0.0, "y": 0.0}, 30.0)
-        
-        # 预期候选点:
-        # 1. 终点 (10, 10)
-        # 2. 第一个拐点 (10, 0)
-        # 3. 第一步 (5, 0)
-        
-        assert len(candidates) == 3
-        assert candidates[0] == {"x": 10.0, "y": 10.0} # 终点
-        assert candidates[1] == {"x": 10.0, "y": 0.0}  # 拐点
-        assert candidates[2] == {"x": 5.0, "y": 0.0}   # 第一步

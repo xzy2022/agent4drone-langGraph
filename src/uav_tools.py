@@ -652,6 +652,28 @@ class SmartNavigateTool(UAVBaseTool):
                 
         return candidates
 
+    def _truncate_path_to_known(self, full_path: List[dict], grid_map: GridMapManager) -> Tuple[List[dict], bool]:
+        """
+        悲观行动：检查路径是否进入未知区域。
+        如果是，则在进入未知区域前的 1-2 个栅格处截断路径。
+        返回：(截断后的路径, 是否被截断)
+        """
+        if not full_path:
+            return [], False
+
+        for i, wp in enumerate(full_path):
+            gx, gy = grid_map._to_grid(wp['x']), grid_map._to_grid(wp['y'])
+            status = grid_map.get_status(gx, gy)
+            
+            # 发现进入未知区域 (-2.0)
+            if status == -2.0:
+                # 往前回退 1-2 个点
+                truncate_idx = max(0, i - 2)
+                print(f"[SmartNav] 路径进入未知区域 (栅格 {gx}, {gy})，在索引 {truncate_idx} 处进行悲观截断。")
+                return full_path[:truncate_idx + 1], True
+                
+        return full_path, False
+
     def _execute(self, drone_id: str, x: float, y: float, z: float) -> str:
         final_target = {"x": x, "y": y, "z": z}
         print(f"\n[SmartNav] 指挥官指令下达: 终点 ({x}, {y}, {z})")
@@ -664,7 +686,7 @@ class SmartNavigateTool(UAVBaseTool):
                 inflation=1
             )
         else:
-            print(f"[SmartNav] 加载无人机 {drone_id} 的历史地图记忆 (已探索 {len(self._persistent_maps[drone_id].grid)} 个栅格)")
+            print(f"[SmartNav] 加载无人机 {drone_id} 的历史地图记忆 (已探索 {len(self._persistent_maps[drone_id].obstacles)} 个栅格)")
             
         # 获取引用
         grid_map = self._persistent_maps[drone_id]
@@ -679,6 +701,8 @@ class SmartNavigateTool(UAVBaseTool):
             # 初始感知建图
             nearby = self.client.get_nearby_entities(drone_id)
             grid_map.add_obstacles_from_entities(nearby)
+            # 标记当前位置周围为已探索
+            grid_map.mark_explored_area(current_pos['x'], current_pos['y'], sense_radius)
 
             # --- 阶段一：垂直高度调整 (决定巡航高度) ---
             # 逻辑：取当前高度和目标高度的较大值作为“巡航高度 (fly_z)”
@@ -731,16 +755,26 @@ class SmartNavigateTool(UAVBaseTool):
                     full_path = [cruise_target] # 手动构造一条直达路径
                 else:
                     return "导航终止：路径被物理遮断，无法规划 A* 路径。"
-                        
+            
+            # 2. 悲观截断：如果路径进入未知区域，则缩短路径
+            path_to_execute, is_truncated = self._truncate_path_to_known(full_path, grid_map)
+            if is_truncated:
+                print(f"[SmartNav] 目标处于未知或必经未知区域，采用截断后的临时目标。")
 
-            # 2. 生成级联候选点
-            candidates = self._get_candidate_waypoints(full_path, current_pos, sense_radius)
+            # 3. 生成级联候选点 (基于截断后的路径)
+            candidates = self._get_candidate_waypoints(path_to_execute, current_pos, sense_radius)
             move_success = False
 
             # 3. 级联尝试
             for i, wp in enumerate(candidates):
                 d_attempt = ((wp['x']-current_pos['x'])**2 + (wp['y']-current_pos['y'])**2)**0.5
-                desc = "全速远航" if i == 0 else "步步为营"
+                if i == 0:
+                    desc = "直达临时目标点"
+                elif i == 1:
+                    desc = "前往第一拐点"
+                else:  # i == 2
+                    desc = "前往临近点"
+                    
                 print(f"[SmartNav] 方案 {i+1} ({desc}): 目标距离 {d_attempt:.1f}m | 目标点 ({wp['x']:.1f}, {wp['y']:.1f}, {cruise_z:.1f})", end="", flush=True)
                 
                 try:
@@ -768,6 +802,8 @@ class SmartNavigateTool(UAVBaseTool):
             
             nearby_entities = self.client.get_nearby_entities(drone_id)
             grid_map.add_obstacles_from_entities(nearby_entities)
+            # 标记新位置周围为已探索
+            grid_map.mark_explored_area(current_pos['x'], current_pos['y'], sense_radius)
 
             # if not move_success:
             #     print("[SmartNav] 警告：水平路径受阻，尝试垂直机动...")
