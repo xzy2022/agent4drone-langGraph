@@ -165,8 +165,8 @@ class MoveAlongPathSchema(BaseModel):
             "Units are in meters (m). "
             "NOTE: Do NOT use this for charging stations."
         ),
-        min_items=1,  # 强制至少有一个点
-        max_items=50  # 防止路径过长导致超时
+        min_length=1,  # 强制至少有一个点
+        max_length=50  # 防止路径过长导致超时
     )
 
 
@@ -586,9 +586,15 @@ class SmartNavigateTool(UAVBaseTool):
     SAFE_FACTOR: float = 0.8  # 安全系数，用于确定“保底安全点”
 
     # --- 1. 新增：类级别的持久化存储 ---
-    # 格式：{ "drone_id": GridMapManager_Instance }
+    # 格式：{ (session_id, drone_id): GridMapManager_Instance }
     # 使用 ClassVar 确保所有工具实例共享这份数据
-    _persistent_maps: ClassVar[Dict[str, GridMapManager]] = {}
+    _persistent_maps: ClassVar[Dict[Tuple[str, str], GridMapManager]] = {}
+
+    def _get_map_cache_path(self, session_id: str, drone_id: str) -> str:
+        """获取地图缓存文件路径"""
+        import os
+        cache_dir = ".map_cache"
+        return os.path.join(cache_dir, f"map_{session_id}_{drone_id}.json")
 
     def _get_candidate_waypoints(self, full_path: List[dict], current_pos: dict, sense_radius: float) -> List[dict]:
         """
@@ -678,18 +684,35 @@ class SmartNavigateTool(UAVBaseTool):
         final_target = {"x": x, "y": y, "z": z}
         print(f"\n[SmartNav] 指挥官指令下达: 终点 ({x}, {y}, {z})")
 
+        # --- 获取 Session ID ---
+        try:
+            session_info = self.client.get_current_session()
+            session_id = session_info.get("id", "default_session")
+        except Exception as e:
+            print(f"[SmartNav] 获取会话 ID 失败: {e}，将使用默认会话。")
+            session_id = "default_session"
+
+        map_key = (session_id, drone_id)
+        cache_path = self._get_map_cache_path(session_id, drone_id)
+
         # --- 2. 获取或创建持久化地图 ---
-        if drone_id not in self._persistent_maps:
-            print(f"[SmartNav] 为无人机 {drone_id} 初始化全新地图记忆...")
-            self._persistent_maps[drone_id] = GridMapManager(
-                resolution=self.GRID_RESOLUTION, 
-                inflation=1
-            )
+        if map_key not in self._persistent_maps:
+            # 尝试从磁盘加载
+            loaded_map = GridMapManager.load_from_disk(cache_path)
+            if loaded_map:
+                print(f"[SmartNav] 从磁盘恢复了无人机 {drone_id} 在会话 {session_id} 的历史地图记忆 (已探索 {len(loaded_map.obstacles)} 个障碍)")
+                self._persistent_maps[map_key] = loaded_map
+            else:
+                print(f"[SmartNav] 为无人机 {drone_id} (会话: {session_id}) 初始化全新地图记忆...")
+                self._persistent_maps[map_key] = GridMapManager(
+                    resolution=self.GRID_RESOLUTION, 
+                    inflation=1
+                )
         else:
-            print(f"[SmartNav] 加载无人机 {drone_id} 的历史地图记忆 (已探索 {len(self._persistent_maps[drone_id].obstacles)} 个栅格)")
+            print(f"[SmartNav] 命中内存缓存：加载无人机 {drone_id} 的历史地图记忆 (已探索 {len(self._persistent_maps[map_key].obstacles)} 个障碍)")
             
         # 获取引用
-        grid_map = self._persistent_maps[drone_id]
+        grid_map = self._persistent_maps[map_key]
         
         try:
             # 1. 获取初始状态
@@ -703,6 +726,9 @@ class SmartNavigateTool(UAVBaseTool):
             grid_map.add_obstacles_from_entities(nearby)
             # 标记当前位置周围为已探索
             grid_map.mark_explored_area(current_pos['x'], current_pos['y'], sense_radius)
+            
+            # 立即保存一次地图
+            grid_map.save_to_disk(cache_path)
 
             # --- 阶段一：垂直高度调整 (决定巡航高度) ---
             # 逻辑：取当前高度和目标高度的较大值作为“巡航高度 (fly_z)”

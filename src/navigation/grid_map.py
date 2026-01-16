@@ -1,4 +1,4 @@
-from typing import List, Tuple, Optional, Dict
+from typing import List, Tuple, Optional, Dict, Set
 import math
 import heapq
 
@@ -14,6 +14,68 @@ class GridMapManager:
         self.explored: Set[Tuple[int, int]] = set()
         self.inflation = inflation
         self.motions = [(-1, 0, 1), (1, 0, 1), (0, -1, 1), (0, 1, 1)]
+
+    def to_dict(self) -> dict:
+        """Serialize map data to a dictionary for JSON storage"""
+        return {
+            "resolution": self.resolution,
+            "inflation": self.inflation,
+            "obstacles": {f"{k[0]},{k[1]}": v for k, v in self.obstacles.items()},
+            "explored": [f"{k[0]},{k[1]}" for k in self.explored]
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> 'GridMapManager':
+        """Create a GridMapManager instance from a dictionary"""
+        instance = cls(
+            resolution=data.get("resolution", 5.0),
+            inflation=data.get("inflation", 1)
+        )
+        
+        # Restore obstacles
+        obstacles_raw = data.get("obstacles", {})
+        for k_str, v in obstacles_raw.items():
+            try:
+                gx, gy = map(int, k_str.split(','))
+                instance.obstacles[(gx, gy)] = float(v)
+            except (ValueError, TypeError):
+                continue
+                
+        # Restore explored area
+        explored_raw = data.get("explored", [])
+        for k_str in explored_raw:
+            try:
+                gx, gy = map(int, k_str.split(','))
+                instance.explored.add((gx, gy))
+            except (ValueError, TypeError):
+                continue
+                
+        return instance
+
+    def save_to_disk(self, path: str):
+        """Save map to a JSON file on disk"""
+        import os
+        import json
+        dirname = os.path.dirname(path)
+        if dirname:
+            os.makedirs(dirname, exist_ok=True)
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(self.to_dict(), f, indent=2)
+
+    @classmethod
+    def load_from_disk(cls, path: str) -> Optional['GridMapManager']:
+        """Load map from a JSON file on disk"""
+        import os
+        import json
+        if not os.path.exists(path):
+            return None
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                return cls.from_dict(data)
+        except Exception as e:
+            print(f"[GridMap] Failed to load map from {path}: {e}")
+            return None
 
     def _to_grid(self, pos: float) -> int:
         return int(round(pos / self.resolution))
