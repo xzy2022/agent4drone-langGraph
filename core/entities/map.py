@@ -16,13 +16,28 @@ class GridMap:
         # (gx, gy) -> 集合, 已探索的空闲空间
         self.explored_free_space: Set[Tuple[int, int]] = set()
 
-    def _to_grid(self, val: float) -> int:
+    def to_grid(self, val: float) -> int:
         """将实际坐标转换为网格坐标"""
-        return int(round(val / self.resolution))
+        return int(math.floor(val / self.resolution))
 
-    def _to_real(self, idx: int) -> float:
+    def to_real(self, idx: int) -> float:
         """将网格坐标转换为实际坐标"""
         return float(idx) * self.resolution
+
+    def get_bounds(self) -> Tuple[float, float, float, float]:
+        """获取地图当前的物理边界 [min_x, max_x, min_y, max_y]"""
+        if not self.obstacles and not self.explored_free_space:
+            return 0.0, 0.0, 0.0, 0.0
+        
+        all_nodes = list(self.obstacles.keys()) + list(self.explored_free_space)
+        min_gx = min(n[0] for n in all_nodes)
+        max_gx = max(n[0] for n in all_nodes)
+        min_gy = min(n[1] for n in all_nodes)
+        max_gy = max(n[1] for n in all_nodes)
+        
+        # 转换为物理边界
+        return (self.to_real(min_gx), self.to_real(max_gx + 1),
+                self.to_real(min_gy), self.to_real(max_gy + 1))
 
     def get_status(self, gx: int, gy: int) -> float:
         """
@@ -111,12 +126,12 @@ class GridMap:
         min_y = min(v.y for v in verts)
         max_y = max(v.y for v in verts)
         
-        start_gx, end_gx = self._to_grid(min_x), self._to_grid(max_x)
-        start_gy, end_gy = self._to_grid(min_y), self._to_grid(max_y)
+        start_gx, end_gx = self.to_grid(min_x), self.to_grid(max_x)
+        start_gy, end_gy = self.to_grid(min_y), self.to_grid(max_y)
         
         for gx in range(start_gx, end_gx + 1):
             for gy in range(start_gy, end_gy + 1):
-                rx, ry = self._to_real(gx), self._to_real(gy)
+                rx, ry = self.to_real(gx), self.to_real(gy)
                 if obs.contains(rx, ry):
                     self._inflate_point(gx, gy, obs.height)
 
@@ -126,7 +141,7 @@ class GridMap:
         radius = obs.radius
         
         radius_grid = int(radius / self.resolution)
-        cgx, cgy = self._to_grid(cx), self._to_grid(cy)
+        cgx, cgy = self.to_grid(cx), self.to_grid(cy)
         
         # 圆形的简单栅格化实现
         for dx in range(-radius_grid, radius_grid + 1):
@@ -140,7 +155,7 @@ class GridMap:
 
     def mark_explored(self, cx: float, cy: float, radius: float):
         """将 (cx, cy) 周围区域标记为已探索。"""
-        cgx, cgy = self._to_grid(cx), self._to_grid(cy)
+        cgx, cgy = self.to_grid(cx), self.to_grid(cy)
         rg = int(math.ceil(radius / self.resolution))
         
         for dx in range(-rg, rg + 1):
