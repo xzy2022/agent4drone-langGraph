@@ -6,9 +6,9 @@ from ..entities.map import GridMap
 from .drone_control import DroneControlUseCase
 from .navigation import NavigationUseCase
 
-class MissionPlanner:
+class NavigationExecutor:
     """
-    Coordinates high-level missions by decomposing them into atomic actions.
+    Coordinates navigation missions by decomposing them into atomic actions.
     """
     def __init__(self, 
                  drone_repo: DroneRepository,
