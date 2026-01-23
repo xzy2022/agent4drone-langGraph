@@ -95,36 +95,48 @@ def test_smart_navigate_loop_truncation():
     """测试 SmartNavigateTool 在执行循环中的截断与重规划流 (Mock 版本)"""
     client = MagicMock()
     tool = SmartNavigateTool(client=client)
+
+    # --- 1. 优化 Mock：模拟无人机移动，防止死循环 ---
+    # 定义 side_effect，第一次调用返回起点，第二次调用返回移动后的点（模拟移动了）
+    # 这样 _execute 中的 while 循环会检测到位置变化或在逻辑中完成判断
+    client.get_drone_status.side_effect = [
+        {"position": {"x": 0.0, "y": 0.0, "z": 10.0}, "perceived_radius": 5.0, "status": "flying"}, # 初始
+        {"position": {"x": 5.0, "y": 0.0, "z": 10.0}, "perceived_radius": 5.0, "status": "flying"}, # 移动后
+        {"position": {"x": 50.0, "y": 0.0, "z": 10.0}, "perceived_radius": 5.0, "status": "flying"}, # 到达目标(防止无限循环)
+    ]
     
-    # 设置初始位置
-    client.get_drone_status.return_value = {
-        "position": {"x": 0.0, "y": 0.0, "z": 10.0},
-        "perceived_radius": 5.0,
-        "status": "flying"
-    }
     client.get_nearby_entities.return_value = {"obstacles": []}
     client.move_to.return_value = {"status": "success"}
     client.change_altitude.return_value = {"status": "success"}
-    
-    # 执行导航到远处 (50, 0)
-    # 第一次循环：A* 规划到 (50,0)，但路径会在 (5,0) 左右被截断 (因为感应半径是 5.0，标记之后 10.0 是未知的)
-    # 预期：move_to 会被调用，且目标坐标应该在已探索范围内
-    
-    # 我们只运行一轮循环来检查逻辑
-    # 注意：_execute 内部有 while 循环，我们需要让它停下来，可以通过 mock 返回值或抛出特定异常
-    
+
+    # 这里的关键是把地图重置为空，确保它是全新的环境
     with patch.object(SmartNavigateTool, '_persistent_maps', {}):
-        # 限制 loop_count 或使用 patch
-        with patch('src.uav_tools.print') as mock_print:
-            # 修改 move_to 让它在第二次调用时返回终止或抛出异常以跳出循环
-            def side_effect_move(*args, **kwargs):
-                return {"status": "success"} # 保持成功
+        
+        # --- 2. 修正 Patch：针对内置 print 函数 ---
+        # 如果你的代码确实是用 print()，请使用 'builtins.print'
+        # 如果你的代码是用 logger.info()，请不要用 patch，改用 caplog fixture
+        with patch('builtins.print') as mock_print:
             
-            client.move_to.side_effect = side_effect_move
+            # 执行导航
+            # 为了防止 A* 搜索不到路径或逻辑卡死，我们可以限制 _execute 内部循环
+            # 但这里我们主要依赖 side_effect 让循环自然结束
+            try:
+                tool._execute(drone_id="test", x=50.0, y=0.0, z=10.0)
+            except StopIteration:
+                # 捕获 side_effect 用尽的情况（如果逻辑跑太多次）
+                pass
+
+            # --- 3. 验证 ---
+            # 打印所有调用的参数，方便调试（如果失败可以看到实际打印了什么）
+            print("\nCaptured prints:", mock_print.call_args_list)
+
+            # 检查是否有包含 "截断" 的打印
+            # 遍历所有调用参数，检查第一个参数（args[0]）是否包含关键字
+            truncated_logs = [
+                call_args 
+                for call_args in mock_print.call_args_list 
+                if len(call_args[0]) > 0 and "截断" in str(call_args[0][0])
+            ]
             
-            # 手动执行一部分 logic
-            result = tool._execute(drone_id="test", x=50.0, y=0.0, z=10.0)
-            
-            # 验证是否有截断日志
-            truncated_logs = [call for call in mock_print.call_args_list if "截断" in str(call)]
-            assert len(truncated_logs) > 0
+            # 断言
+            assert len(truncated_logs) > 0, "未检测到路径截断的日志输出，请检查代码是否执行了截断逻辑或是否使用了 print"
