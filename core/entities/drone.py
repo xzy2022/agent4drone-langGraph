@@ -6,7 +6,7 @@ from .position import Position
 class DroneState(Enum):
     LANDED = "LANDED"       # 未起飞（降落后进入该状态）
     HOVERING = "HOVERING"   # 悬停中（显示指定悬停命令）
-    FLYING = "FLYING"       # 飞行中（正在执行飞行）
+    # FLYING = "FLYING"       # 飞行中（正在执行飞行）
     IDLE = "IDLE"           # 空闲（飞在空中，但是没有移动，也没有指定悬停）
     UNKNOWN = "UNKNOWN"     # 未知
     CHARGING = "CHARGING"   # 充电中
@@ -30,7 +30,7 @@ class Drone:
         return False
 
     def land(self) -> bool:
-        if self.state == DroneState.IDLE:
+        if self.state == DroneState.IDLE or self.state == DroneState.HOVERING:
             self.position.z = 0
             self.state = DroneState.LANDED
             return True
@@ -44,20 +44,22 @@ class Drone:
     #     return False
 
     def hover(self) -> bool:
-        if self.state == DroneState.IDLE or self.state == DroneState.FLYING:
+        if self.state == DroneState.IDLE:
             self.state = DroneState.HOVERING
             return True
         return False
 
     def move(self, position: Position) -> bool:
-        if self.state == DroneState.IDLE or self.state == DroneState.HOVERING or self.state == DroneState.FLYING:
+        if self.state == DroneState.IDLE or self.state == DroneState.HOVERING:
             self.position = position
+            self.state = DroneState.IDLE
             return True
         return False
 
     def rotate(self, heading: float) -> bool:
-        if self.state == DroneState.IDLE or self.state == DroneState.HOVERING or self.state == DroneState.FLYING:
+        if self.state == DroneState.IDLE or self.state == DroneState.HOVERING:
             self.heading = heading
+            self.state = DroneState.IDLE
             return True
         return False
     
