@@ -14,9 +14,13 @@ from core.entities.obstacle import PolygonObstacle
 from core.use_cases.navigation.adaptive_navigation import AdaptiveNavigation
 from tests.navigation.viz_utils import visualize_navigation_result
 
+"""
+inflation膨胀后的障碍物直接被绘制了出来，因此视觉效果是贴着障碍物飞的，但是实际上有安全距离。
+"""
+
 class TestAspect3Obstacles(unittest.TestCase):
     def setUp(self):
-        self.grid_map = GridMap(resolution=1.0)
+        self.grid_map = GridMap(resolution=0.5, inflation=2)
         self.drone = Drone("d1", Position(0,0,0))
         self.nav = AdaptiveNavigation()
 
@@ -49,12 +53,12 @@ class TestAspect3Obstacles(unittest.TestCase):
         ], height=10.0)
         self.grid_map.add_obstacle(obs)
         
-        end_pos = Position(0, 4, 0)
+        end_pos = Position(0, 5, 0)
         # Direct dist is 4.
         # Detour approx (0,0)->(4,2)->(0,4) = sqrt(16+4)*2 = 4.47*2 = 8.9.
         # Let's set max_dist = 6.0.
         # It should pass valid straight range (4.0) but fail path range (8.9).
-        max_dist = 6.0
+        max_dist = 10.0
         
         path = self.nav.navigate(self.drone, end_pos, self.grid_map, max_dist)
         
