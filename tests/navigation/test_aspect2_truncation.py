@@ -48,16 +48,17 @@ class TestAspect2Truncation(unittest.TestCase):
             total_len += math.sqrt((p1.x - p2.x)**2 + (p1.y - p2.y)**2)
             
         print(f"Total Path Length: {total_len}")
-        self.assertAlmostEqual(total_len, 5.5, places=2)
+        
+        # We expect it to be very close to 5.5.
+        # Due to float precision, it might be 5.499999 or 5.5000001
+        self.assertLessEqual(total_len, 5.5 + 1e-5, "Path length exceeded max distance.")
+        self.assertAlmostEqual(total_len, 5.5, places=2, msg="Path length should be practically equal to max_dist")
         
         # 2. Check Final Point Coordinates (Interpolation Check)
         self.assertAlmostEqual(final_pt.x, 5.5, places=2)
         self.assertAlmostEqual(final_pt.y, 0.0, places=2)
         
         # 3. Check it does not contain original target
-        # Original is (10,0)
-        # Note: Position equality checks x, y, z.
-        # But we should be careful with float comparisons.
         dist_to_orig = math.sqrt((final_pt.x - end_pos.x)**2 + (final_pt.y - end_pos.y)**2)
         self.assertGreater(dist_to_orig, 1.0, "Path should not reach original target.")
 

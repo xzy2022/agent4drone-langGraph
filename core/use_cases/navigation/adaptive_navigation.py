@@ -47,18 +47,21 @@ class AdaptiveNavigation:
         
 
         # 将起点和终点对齐到精确位置（A* 返回网格中心）
+        # 将起点和终点对齐到精确位置（A* 返回网格中心）
         full_path[0] = start_pos
         full_path[-1] = destination
         
-        # 如有必要，进行截断（根据累计距离）
-        final_path = full_path
-        if h_dist > max_move_dist:
-             final_path = self._truncate_path(full_path, max_move_dist)
+        # 1. 首先简化路径（基于视线优化）
+        # 这确保我们测量和截断的是实际飞行的“拉直”路径，而不是锯齿状网格路径。
+        simplified_path = self._simplify_path(full_path, grid_map)
         
-        # 简化路径（基于视线优化）
-        simplified_path = self._simplify_path(final_path, grid_map)
+        # 2. 截断路径
+        # _truncate_path 会处理“如果路径短于 max_dist 则保持原样”的逻辑，
+        # 所以我们可以始终调用它，或者保留 h_dist 检查作为优化（但 h_dist 是直线距离，路径可能绕弯）。
+        # 为了正确处理绕障路径长度，我们直接对简化后的路径进行截断检查。
+        final_path = self._truncate_path(simplified_path, max_move_dist)
         
-        return simplified_path
+        return final_path
 
     def _truncate_path(self, path: List[Position], max_dist: float) -> List[Position]:
         """
