@@ -111,6 +111,7 @@ class GridMap:
         
         from .obstacle import PolygonObstacle, CircleObstacle
         
+        print(f"DEBUG: Adding obstacle type {type(obstacle)}")
         if isinstance(obstacle, PolygonObstacle):
             self._add_polygon_obstacle(obstacle)
         elif isinstance(obstacle, CircleObstacle):
@@ -129,11 +130,17 @@ class GridMap:
         start_gx, end_gx = self.to_grid(min_x), self.to_grid(max_x)
         start_gy, end_gy = self.to_grid(min_y), self.to_grid(max_y)
         
+        print(f"DEBUG: Rasterizing poly. BoundX: {start_gx}->{end_gx}, BoundY: {start_gy}->{end_gy}")
+        
+        count = 0
         for gx in range(start_gx, end_gx + 1):
             for gy in range(start_gy, end_gy + 1):
                 rx, ry = self.to_real(gx), self.to_real(gy)
+                # print(f"Checking point ({rx}, {ry}) for gx={gx}, gy={gy}")
                 if obs.contains(rx, ry):
                     self._inflate_point(gx, gy, obs.height)
+                    count += 1
+        print(f"DEBUG: Added {count} grid cells from polygon.")
 
     def _add_circle_obstacle(self, obs: 'CircleObstacle'):
         """添加圆形障碍物。"""
