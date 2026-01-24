@@ -32,12 +32,13 @@ def create_graph():
     # Get UAV server configuration from environment
     uav_base_url = os.getenv("UAV_BASE_URL", "http://localhost:8000")
     uav_api_key = os.getenv("UAV_API_KEY", None)
+    agent_api_key = "agent_secret_key_change_in_production"
 
     # Create the graph using settings file
     return create_uav_agent_graph_from_settings(
         settings_path="llm_settings.json",
         uav_base_url=uav_base_url,
-        uav_api_key=uav_api_key,
+        uav_api_key=agent_api_key,
     )
 
 
