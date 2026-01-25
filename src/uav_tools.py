@@ -656,6 +656,12 @@ class SmartNavigateTool(UAVBaseTool):
         cache_dir = ".map_cache"
         return os.path.join(cache_dir, f"map_{session_id}.json")
 
+    def _get_obstacle_log_path(self, session_id: str) -> str:
+        """获取障碍物日志文件路径"""
+        import os
+        cache_dir = ".map_cache"
+        return os.path.join(cache_dir, f"obstacles_{session_id}.json")
+
     def _get_candidate_waypoints(self, full_path: List[dict], current_pos: dict, sense_radius: float) -> List[dict]:
         """
         策略优化版 v2:
@@ -795,6 +801,11 @@ class SmartNavigateTool(UAVBaseTool):
             
             # 立即保存一次地图
             grid_map.save_to_disk(cache_path)
+            
+            # --- 额外保存一份纯障碍物 JSON (满足指挥官需求) ---
+            obs_log_path = self._get_obstacle_log_path(session_id)
+            grid_map.save_obstacle_entities(obs_log_path)
+            print(f"[SmartNav] 障碍物清单已更新: {obs_log_path} (当前已知 {len(grid_map.obstacle_entities)} 个)")
 
             # --- 阶段一：垂直高度调整 (决定巡航高度) ---
             # 逻辑：取当前高度和目标高度的较大值作为“巡航高度 (fly_z)”

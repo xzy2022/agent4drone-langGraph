@@ -12,6 +12,8 @@ class GridMapManager:
         self.obstacles: Dict[Tuple[int, int], float] = {}
         # (gx, gy) -> Set, 存储已探索过的“空地”
         self.explored: Set[Tuple[int, int]] = set()
+        # id -> raw_obstacle_data
+        self.obstacle_entities: Dict[str, Dict] = {}
         self.inflation = inflation
         self.motions = [(-1, 0, 1), (1, 0, 1), (0, -1, 1), (0, 1, 1)]
 
@@ -21,7 +23,8 @@ class GridMapManager:
             "resolution": self.resolution,
             "inflation": self.inflation,
             "obstacles": {f"{k[0]},{k[1]}": v for k, v in self.obstacles.items()},
-            "explored": [f"{k[0]},{k[1]}" for k in self.explored]
+            "explored": [f"{k[0]},{k[1]}" for k in self.explored],
+            "obstacle_entities": self.obstacle_entities
         }
 
     @classmethod
@@ -41,14 +44,16 @@ class GridMapManager:
             except (ValueError, TypeError):
                 continue
                 
-        # Restore explored area
-        explored_raw = data.get("explored", [])
-        for k_str in explored_raw:
+        instance.explored = set()
+        for k_str in data.get("explored", []):
             try:
                 gx, gy = map(int, k_str.split(','))
                 instance.explored.add((gx, gy))
             except (ValueError, TypeError):
                 continue
+        
+        # Restore obstacle entities
+        instance.obstacle_entities = data.get("obstacle_entities", {})
                 
         return instance
 
@@ -76,6 +81,16 @@ class GridMapManager:
         except Exception as e:
             print(f"[GridMap] Failed to load map from {path}: {e}")
             return None
+
+    def save_obstacle_entities(self, path: str):
+        """Save raw obstacle entities to a separate JSON file"""
+        import os
+        import json
+        dirname = os.path.dirname(path)
+        if dirname:
+            os.makedirs(dirname, exist_ok=True)
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(self.obstacle_entities, f, indent=2, ensure_ascii=False)
 
     def _to_grid(self, pos: float) -> int:
         return int(round(pos / self.resolution))
@@ -189,8 +204,8 @@ class GridMapManager:
             # --- 情况 2: 椭圆 (Ellipse) ---
             elif obs_type == 'ellipse' and obs.get('width') and obs.get('length'):
                 # width 是 x轴方向全长，length 是 y轴方向全长
-                a = obs['width'] / 2.0  # 半长轴 x
-                b = obs['length'] / 2.0 # 半短轴 y
+                a = obs['width']  # 半长轴 x
+                b = obs['length'] # 半短轴 y
                 
                 # 1. 计算包围盒
                 start_gx = self._to_grid(cx - a)
@@ -245,6 +260,16 @@ class GridMapManager:
                 # 确保中心点一定被添加
                 if radius_grid == 0:
                     self._inflate_point(cgx, cgy, height)
+
+            # --- 保存原始障碍物信息 ---
+            obs_id = obs.get('id')
+            if obs_id:
+                # 如果已存在，则更新（可能位置或参数有细微变化）
+                self.obstacle_entities[str(obs_id)] = obs
+            else:
+                # 如果没有 ID（通常是服务器返回的简单障碍物），可以使用位置作为键的一部分或跳过
+                # 这里为了严谨，如果没有 ID 暂不记录，因为无法唯一追踪
+                pass
 
     def is_blocked(self, gx: int, gy: int, nav_z: float, optimistic: bool = False) -> bool:
         """检查点是否被遮挡 (高度冲突)"""
