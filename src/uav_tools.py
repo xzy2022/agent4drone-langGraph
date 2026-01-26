@@ -923,19 +923,39 @@ class SmartNavigateTool(UAVBaseTool):
         if loop_count >= max_loops:
             return "导航超时：执行步数过多。"
 
-        # --- 阶段三：垂直降落/调整 (Descend Phase) ---
+        return_message = ''
+
+        # --- 阶段三：最终水平矫正 (Final Horizontal Adjustment) ---
+        if abs(current_pos['x'] - final_target['x']) > 0.05 or abs(current_pos['y'] - final_target['y']) > 0.05:
+            move_result_stage3 = self.client.move_to(drone_id, final_target['x'], final_target['y'], cruise_z)
+            if isinstance(move_result_stage3, dict) and move_result_stage3.get('status') == 'error':
+                msg = move_result_stage3.get('message', '').lower()
+                if "obstacle" in msg or "collision" in msg:
+                    print("[最终水平矫正遇阻]")
+                    return_message += "导航失败：最终水平矫正遇阻。 "
+                else:
+                    print(f"[最终水平矫正执行异常: {msg}")
+                    return_message += "导航失败：最终水平矫正执行异常。 "
+            else:
+                print("[最终水平矫正成功]")
+                return_message += "导航成功：最终水平矫正成功。 "
+
+        # --- 阶段四：垂直降落/调整 (Descend Phase) ---
         # 此时已经到达目标 X/Y 上方，高度为 cruise_z
         # 如果 cruise_z 比 final_target['z'] 高，则下降
         
-        if abs(current_pos['z'] - final_target['z']) > 0.5:
+
+        if abs(current_pos['z'] - final_target['z']) > 0.01:
             print(f"[SmartNav] 正在从 {current_pos['z']:.1f}m 调整高度至 {final_target['z']:.1f}m...")
             try:
                 self.client.change_altitude(drone_id, final_target['z'])
-                return "成功抵达目的地 (包含高度调整)"
+                return_message += "成功抵达目的地 (包含高度调整) "
             except Exception as e:
-                return f"最终高度调整失败: {str(e)}"
+                return_message += f"最终高度调整失败: {str(e)} "
         
-        return "成功抵达目的地"
+        return_message += "成功抵达目的地"
+
+        return return_message
 
 
 # ============================================================================
