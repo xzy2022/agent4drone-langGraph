@@ -9,6 +9,8 @@ from .obstacle import (
     EllipseObstacle
 )
 from .task import Task, TaskStatus
+from .agent import Agent, AgentStatus
+
 
 __all__ = [
     'Position',
@@ -21,5 +23,8 @@ __all__ = [
     'CylinderObstacle',
     'EllipseObstacle',
     'Task',
-    'TaskStatus'
+    'TaskStatus',
+    'Agent',
+    'AgentStatus'
 ]
+
