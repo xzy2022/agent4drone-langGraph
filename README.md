@@ -1,78 +1,69 @@
-```markdown
-# Agent4Drone - LangGraph
+﻿# Agent4Drone - LangGraph
 
-一个基于 LangGraph 和 LangChain 构建的智能 UAV（无人机）控制代理系统。该项目支持使用多种 LLM 提供商（OpenAI, DeepSeek, Ollama）进行无人机的自然语言控制。
+基于 LangGraph / LangChain 的智能 UAV（无人机）控制代理项目。支持 OpenAI、DeepSeek、Ollama 等多种 LLM 提供商，通过自然语言完成无人机查询、起飞、移动、扫描等任务，并可在 LangGraph Studio 中可视化调试。
+
+## 项目亮点
+
+- 采用 LangGraph ReAct 循环，消息 -> 工具 -> 反馈的完整链路清晰可追踪
+- 统一的 UAV API Client + Tool 封装，便于对接真实或模拟飞行器
+- 支持多 LLM 提供商与配置化切换，便于本地/云端混合使用
 
 ## 项目结构
 
-• `demo_agent.py`: 使用 `LangGraph` 和 `src.graph` 的现代代理实现。
+- `demo_agent.py`：命令行演示入口，支持参数覆盖 LLM 配置
+- `src/graph.py`：LangGraph 状态图与 ReAct 逻辑
+- `src/uav_tools.py`：无人机控制工具（起飞、移动、扫描、查询等）
+- `src/uav_api_client.py`：与 UAV API 服务通信的 HTTP 客户端
+- `src/navigation/`：路径规划与栅格地图（A*）
+- `llm_settings.json`：多提供商 LLM 配置
+- `langgraph_studio_entry.py` / `langgraph.json`：Studio 可视化配置
 
-• `src/`: 核心逻辑和工具。
-  • `graph.py`: LangGraph 状态图定义。
-  • `uav_tools.py`: 无人机控制工具（起飞、移动、扫描等）。
-  • `uav_api_client.py`: 用于与无人机模拟器/硬件通信的 HTTP 客户端。
-  • `navigation/`: 路径规划和栅格地图逻辑（A* 算法）。
+## 环境要求
 
-• `llm_settings.json`: LLM 提供商的配置。
-
+- Python >= 3.11
 
 ## 安装
 
-本项目需要 Python >= 3.11。
-
-1. 克隆仓库（如果尚未完成）。
-2. 创建并激活虚拟环境（推荐anaconda/miniconda）：
-3. 安装依赖：
-   ```bash
-   pip install -r requirements.txt
-   ```
+```bash
+pip install -r requirements.txt
+```
 
 ## 配置
 
-1. 环境变量：
-   在根目录下创建一个 `.env` 文件来存储你的 API 密钥：
-   ```ini
-   OPENAI_API_KEY=sk-...
-   DEEPSEEK_API_KEY=sk-...
-   LLM_API_KEY=sk-...
-   UAV_API_KEY=...
-   ```
+1. 环境变量（可选）：在项目根目录创建 `.env`
 
-2. LLM 设置：
-   编辑 `llm_settings.json` 以配置你首选的 LLM 提供商（Ollama, OpenAI, DeepSeek 等）和模型。
+```ini
+OPENAI_API_KEY=sk-...
+DEEPSEEK_API_KEY=sk-...
+LLM_API_KEY=sk-...
+UAV_API_KEY=...
+```
 
-## 使用方法
+2. LLM 配置：编辑 `llm_settings.json` 选择提供商与默认模型
 
-### 运行现代代理 (LangGraph)
-推荐用于新开发。
+## 快速开始
 
 ```bash
 python demo_agent.py
 ```
-选项：
-• `--use-settings`: 从 `llm_settings.json` 加载配置（默认）。
-• `--provider [openai|ollama]`: 通过 CLI 覆盖提供商设置。
 
-### 可视化开发 (LangGraph Studio)
-本项目支持使用 LangGraph Studio 进行可视化开发和调试。
+常用参数：
 
-1. 确保已安装 `langgraph-cli` (已包含在 `requirements.txt` 中)。
+- `--use-settings`：从 `llm_settings.json` 加载配置
+- `--provider` / `--base-url` / `--model` / `--api-key`：命令行覆盖配置
+- `--uav-base-url`：UAV API 服务地址（默认 `http://localhost:8000`）
 
-2. 运行开发服务器：
-   ```bash
-   langgraph dev
-   ```
+## 可视化调试（LangGraph Studio）
 
-3. 浏览器将自动打开 LangGraph Studio 界面。你可以：
-   - 可视化查看代理的状态图 (`graph.py`)。
-   - 交互式地发送消息并观察代理的思考过程和工具调用。
-   - 修改代码后实时热重载。
+```bash
+langgraph dev
+```
 
-配置入口文件：`langgraph_studio_entry.py`
+入口文件：`langgraph_studio_entry.py`  
 配置文件：`langgraph.json`
 
-### 运行测试
+## 运行测试
+
 ```bash
 pytest
-```
 ```
